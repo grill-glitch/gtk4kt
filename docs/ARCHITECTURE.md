@@ -1,4 +1,4 @@
-# ika GTK4/Kotlin Declarative UI Framework — Architecture
+# gtk4kt — Kotlin Declarative GTK4 UI Framework — Architecture
 
 > **Phase 1 of 6** — Research, Validation & Architecture Design
 
@@ -8,29 +8,27 @@
 
 **Goal**: Build a Kotlin-first declarative UI framework for Linux/GNOME using GTK4 + Libadwaita as the native backend. Users write Compose-style Kotlin DSL; the framework produces real GTK4 widgets with native rendering, accessibility, and theming.
 
-**Recommended architecture**: Kotlin/Native (K/N) + Rust + gtk-rs
+**Current implementation**: Kotlin/JVM (Kotlin 2.4.10) + JDK 21 Panama FFI + Rust cdylib + GTK4
+> **Status**: Phase 1 PoC ✅ verified working — GTK window opens, displays label+button, runs main loop.
 
-**Why K/N + Rust**:
-- K/N has mature C interop — GTK's C API is directly callable without JNI boilerplate
-- Rust's gtk-rs provides safe, idiomatic GTK4 bindings (auto-generated from GIR)
-- K/N + Rust avoids the JVM+Skiko compatibility hell we hit with Compose Desktop
-- Both Kotlin and Rust compile to native code; communication via Rust `cdylib` + C ABI is clean and fast
-- gtk-kn project (active, 2024) proves K/N + GIR + GTK4 is viable
+**Why Kotlin/JVM + Panama**:
+- JDK 21 Panama FFI (`Linker`, `SymbolLookup`) provides zero-dependency native interop without JNI boilerplate
+- Kotlin/JVM gives us a stable, familiar toolchain; no Kotlin/Native toolchain complexity
+- Rust cdylib (`libgtk4kt_native.so`) exposes safe C-compatible API via `#[no_mangle] extern "C"`
+- Panama FFI calls native functions directly from Kotlin with full type safety
+
+**Why Rust over C**:
+- gtk-rs provides idiomatic, memory-safe GTK4 bindings; widget lifetimes handled by Rust ownership
+- Rust's `cdylib` compiles to a native `.so` with clean C ABI
+- C shim replaced by pure Rust — no manual `dlopen`/`dlsym` in C
 
 **Why NOT pure Kotlin/JVM + JNI**:
-- JNI with GTK4 is heavyweight and awkward for daily UI work
-- Compose Desktop on this Arch Linux + OpenJDK 21 + Mesa environment has Skiko GPU driver incompatibility that is unresolvable without patching Skiko itself
-- JNI requires managing global refs, threadAttach/detach, and reference counting manually in both JVM and C
+- JNI requires `System.loadLibrary()` + `native` keyword + generated JNI stubs — heavyweight for daily UI work
+- JNI threadAttach/detach complexity; global reference management
 
-**Why NOT Kotlin/Native with direct C interop (no Rust)**:
-- GObject introspection (GIR) bindings from Kotlin require complex custom generators (gtk-kn approach)
-- gtk-kn exists but is still maturing; using gtk-rs (stable, well-tested) as the GTK bridge while writing application logic in Kotlin/Native is more pragmatic
-- Rust gives us safe memory management for GTK object lifetimes without manual refcounting in Kotlin
-
-**Why NOT Compose Desktop with GTK backend**:
-- We exhaustively tried: Skiko 0.144.5/0.144.6 + OpenJDK 21 + Mesa = GPU context NPE, no resolution
-- Even with SkikoLoader workaround, the SkiaLayer initialization crashes in `clinit`
-- Compose 1.11.1's Skia rendering layer has ABI incompatibility with this specific environment
+**Why NOT Kotlin/Native + C interop**:
+- Kotlin/Native toolchain adds complexity (LLVM, customstdlib)
+- We already have a working Kotlin/JVM setup; Panama bridges the gap without K/N
 
 ---
 
@@ -488,39 +486,38 @@ GTK widget update
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Kotlin Application                        │
+│                     Kotlin/JVM Application                        │
 │                                                                  │
-│   @Composable fun App() = Column { Text("Hello") }               │
-│                                                                  │
-│   var count by state(0)                                          │
-│                                                                  │
+│   application("org.gtk4kt.example") {                            │
+│       window {                                                   │
+│           Box(Orientation.Vertical) {                           │
+│               Label("Hello from gtk4kt!")                        │
+│               Button("Click me!")                               │
+│           }                                                      │
+│       }                                                          │
+│   }                                                              │
 └──────────────────────┬──────────────────────────────────────────┘
-                       │
+                       │ JDK 21 Panama FFI (java.lang.foreign)
                        ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│              Declarative UI Runtime (Kotlin/Native)             │
+│              Rust cdylib (libgtk4kt_native.so)                  │
 │                                                                  │
-│   Node Tree      State<T>     Recomposer     ModifierChain        │
-│   Composition    Snapshot     DiffEngine     LayoutInterpreter    │
+│   gtk_bridge_init()           → gtk::init_check()               │
+│   gtk_bridge_application_new() → gtk::Application::new()         │
+│   gtk_bridge_window_new()     → gtk::ApplicationWindow::new()   │
+│   gtk_bridge_box_new()        → gtk::Box::new()                  │
+│   gtk_bridge_button_new()     → gtk::Button::new()               │
+│   gtk_bridge_label_new()      → gtk::Label::new()                 │
+│   gtk_bridge_window_set_child() → gtk::Window::set_child()        │
+│   gtk_bridge_box_append()      → gtk::Box::append()               │
+│   gtk_bridge_application_run() → gtk::Application::run_with_args()│
 │                                                                  │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │ C ABI (extern "C" functions)
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              Rust cdylib (libgtk_bridge.so)                     │
-│                                                                  │
-│   gtk_app_new()              → AdwApplication                   │
-│   gtk_window_new()           → AdwApplicationWindow             │
-│   gtk_box_append()           → gtk_box_append()                  │
-│   gtk_button_new()           → gtk_button_new()                  │
-│   gtk_label_new()            → gtk_label_new()                    │
-│   gtk_signal_connect()       → g_signal_connect()               │
-│                                                                  │
-│   WidgetCache (HashMap<KotlinNodeId, gtk::Widget>)               │
-│   ── manages GTK widget lifetime, avoids recreating widgets       │
+│   WidgetRegistry (thread_local HashMap<u64, gtk::Widget>)         │
+│   ApplicationRegistry (thread_local HashMap<u64, gtk::Application>)│
+│   ── manages GTK widget lifetimes, avoids recreating widgets      │
 │                                                                  │
 └──────────────────────┬──────────────────────────────────────────┘
-                       │ gtk-rs safe wrappers + direct FFI
+                       │ gtk-rs 0.11 safe wrappers + direct FFI
                        ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    GTK4 / Libadwaita                            │
@@ -532,21 +529,29 @@ GTK widget update
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 10.1 Kotlin/Native Application Entry Point
+### 10.1 gtk4kt Application Entry Point
 
 ```kotlin
 fun main() {
-    gtkInit()
-    val app = gtkApplicationNew("org.librelab.ika", 0)
-    
-    gtkApp.connectActivate { window ->
-        // Build UI using declarative runtime
-        val ui = IkaApp()
-        ui.setWindow(window)
-        ui.compose()
+    GTKNative.init()
+
+    val app = GTKNative.applicationNew("org.gtk4kt.example", 0)
+    val window = GTKNative.windowNew(app)
+
+    val box = GTKNative.boxNew(GTKNative.ORIENTATION_VERTICAL)
+    val label = GTKNative.labelNew("Hello from gtk4kt!")
+    val button = GTKNative.buttonNew("Click me!")
+
+    GTKNative.boxAppend(box, label)
+    GTKNative.boxAppend(box, button)
+    GTKNative.windowSetChild(window, box)
+    GTKNative.windowSetTitle(window, "gtk4kt")
+
+    GTKNative.buttonConnectClicked(button) {
+        println("Button clicked!")
     }
-    
-    gtkRun(app)
+
+    GTKNative.applicationRun(app)
 }
 ```
 
@@ -595,31 +600,33 @@ pub extern "C" fn gtk_bridge_header_bar_set_title_widget(bar: u64, title: u64);
 
 ## 11. Build System
 
-### 11.1 Approach
+### 11.1 Project Structure
 
 ```
-ika/                          ← Gradle project (Kotlin/JVM for now)
-├── app/                      ← Android app
-├── engine-ons-desktop/       ← ONS launcher
-├── engine-web-core/          ← Web game engine
-├── ika-desktop/              ← Desktop UI (Kotlin/Native + Rust)
-│   ├── build.gradle.kts
-│   ├── src/main/kotlin/      ← Kotlin/Native UI code
-│   ├── src/main/rust/        ← Rust cdylib source
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs
-│   └── src/main/resources/   ← libgtk_bridge.so (built artifact)
-└── settings.gradle.kts
+gtk4kt/                    ← Gradle project (Kotlin/JVM)
+├── build.gradle.kts        ← Kotlin JVM app, Java 21, no Android
+├── settings.gradle.kts
+├── gradlew / gradlew.bat
+└── src/main/
+    ├── kotlin/org/librelab/gtk4kt/
+    │   ├── Gtk4kt.kt              ← Public DSL API
+    │   ├── examples/Hello.kt      ← PoC entry point
+    │   └── internal/
+    │       └── GTKNative.kt       ← JDK 21 Panama FFI binding
+    ├── rust/
+    │   ├── Cargo.toml             ← gtk4 0.11, glib 0.22, gio 0.22, cdylib
+    │   └── src/lib.rs             ← Rust cdylib (extern "C" functions)
+    └── resources/
+        └── libgtk4kt_native.so    ← Built artifact (gitignored)
 ```
 
 ### 11.2 Build Process
 
-1. Gradle compiles Kotlin/Native code (ika-desktop)
-2. Gradle invokes `cargo build --release` in `src/main/rust/`
-3. Cargo produces `libgtk_bridge.so`
-4. Gradle copies `.so` to `resources/`
-5. Gradle packages all into `installDist/`
-6. Kotlin/Native embarks `.so` via `NativeTestLibrariesLoader` or `dlopen`
+1. `./gradlew installDist` compiles Kotlin and packages JAR
+2. `cp target/release/libgtk4kt_native.so build/install/gtk4kt/lib/`
+3. Or: `./gradlew copyNativeLibs` (custom Copy task)
+4. Run: `java --enable-preview -Djava.library.path=lib -cp lib/* org.librelab.gtk4kt.examples.HelloKt`
+5. Rust cdylib loaded via `System.load("/absolute/path/libgtk4kt_native.so")` at runtime
 
 ### 11.3 Kotlin/Native Toolchain
 
