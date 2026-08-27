@@ -1,0 +1,21 @@
+[package]
+name = "gtk4kt-native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+name = "gtk4kt_native"
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.11" }
+glib = { version = "0.22" }
+gio = { version = "0.22" }
+libadwaita = { package = "libadwaita", version = "0.9" }
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+panic = "abort"
+lto = true
+opt-level = 2

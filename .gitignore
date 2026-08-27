@@ -1,0 +1,25 @@
+# Build outputs
+build/
+.gradle/
+*.class
+*.jar
+*.so
+
+# Cargo/Rust
+src/main/rust/target/
+Cargo.lock
+
+# IDE
+.idea/
+*.iml
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+local.properties
+
+# Hermes (desktop attachments / session state)
+.hermes/
