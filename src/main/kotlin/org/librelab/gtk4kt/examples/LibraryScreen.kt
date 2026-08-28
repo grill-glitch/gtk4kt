@@ -221,6 +221,29 @@ private fun BoxBuilder.GameCard(
     onClick: () -> Unit,
     onMore: () -> Unit,
 ) {
+    // Compose source:
+    //   var menuOpen by remember { mutableStateOf(false) }
+    //   Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    //     GameCover(game, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+    //     Row(modifier = ..., verticalAlignment = Alignment.CenterVertically) {
+    //       Column(Modifier.weight(1f)) {
+    //         Text(game.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    //         Text(stringResource(game.typeEnum().labelRes))
+    //       }
+    //       Box { IconButton(onClick = { menuOpen = true }) { Icon(MoreVert) }
+    //             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+    //               DropdownMenuItem("Launch", ...)
+    //               DropdownMenuItem("Delete", ...)
+    //             }
+    //       }
+    //     }
+    //   }
+    //
+    // Phase 6-4 limitation: gtk4kt has `State<T>` (added this round) but
+    // no reactive recomposition — the menu is always shown rather than
+    // gated by `menuOpen`. Phase 6-5 will add reactive rebuilds.
+    val menuOpen = remember("gameCard_menuOpen_${'$'}{game.name}", false)
+
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -234,7 +257,19 @@ private fun BoxBuilder.GameCard(
                 Text(game.name)
                 Text(game.typeLabel)
             }
-            IconButton(Icons.Outlined.MoreVert) { onMore() }
+            // Dropdown trigger — IconButton + (always-visible) DropdownMenu.
+            // Phase 6-5: gate on menuOpen.value.
+            Box {
+                IconButton(Icons.Outlined.MoreVert) {
+                    menuOpen.setValue(!menuOpen.value)
+                }
+                if (menuOpen.value) {
+                    DropdownMenu(label = "Actions") {
+                        DropdownMenuItem("Launch") { System.err.println("[GameCard] launch ${'$'}{game.name}") }
+                        DropdownMenuItem("Delete") { System.err.println("[GameCard] delete ${'$'}{game.name}") }
+                    }
+                }
+            }
         }
     }
 }

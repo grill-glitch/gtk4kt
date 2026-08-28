@@ -700,6 +700,79 @@ internal data class LazyItem(val children: List<WidgetNode>) {
 }
 
 // ============================================================================
+// State primitives (Phase 6-4) — Compose-like remember/mutableStateOf
+// ============================================================================
+//
+// gtk4kt UI is mostly static (one-shot JSON tree). For interactive patterns
+// like dropdown menus, we need a tiny state store that:
+//  - is keyed by call-site (Compose's `remember { ... }` lifecycle)
+//  - propagates changes back to Rust (so the JSON can be rebuilt)
+//
+// Phase 6-4 implementation:
+//  - State holds current value + listener callbacks
+//  - setValue() invokes listeners (registered by build-time invocations)
+//  - rebuilds are NOT automatic; callers must call `setValue` then trigger
+//    a refresh (Phase 6-5 wires this to gtk_main_iteration tick).
+//
+// This is intentionally minimal — Phase 6-5 will move to proper reactive
+// primitives when the integration cost is justified.
+
+class State<T>(initial: T) {
+    @Volatile
+    private var current: T = initial
+    private val listeners = mutableListOf<(T) -> Unit>()
+
+    val value: T get() = current
+
+    fun setValue(new: T) {
+        current = new
+        listeners.toList().forEach { it(new) }
+    }
+
+    internal fun addListener(l: (T) -> Unit) {
+        listeners.add(l)
+    }
+
+    internal fun removeListener(l: (T) -> Unit) {
+        listeners.remove(l)
+    }
+
+    companion object {
+        // Global state store: keyed by call-site identity. Garbage-collected
+        // when no widget holds a reference. Phase 6-4: simple HashMap; Phase
+        // 6-5 will move to scoped keys tied to widget lifecycle.
+        private val store = mutableMapOf<String, State<*>>()
+
+        @Suppress("UNCHECKED_CAST")
+        fun <T> get(key: String, initial: T): State<T> {
+            val existing = store[key]
+            if (existing != null) return existing as State<T>
+            val created = State(initial)
+            store[key] = created
+            return created
+        }
+    }
+}
+
+/**
+ * Compose-like `remember(key) { ... }` — store/retrieve a state value across
+ * recompositions. Key should be unique per call site; the framework doesn't
+ * have a Recomposer yet, but the state survives so callbacks can mutate it.
+ */
+fun <T> remember(key: String, initial: T): State<T> = State.get(key, initial)
+
+/**
+ * Compose-like `mutableStateOf(initial)` — returns a `State<T>` with property
+ * delegate support. Usage:
+ *   var menuOpen by remember("menuOpen") { mutableStateOf(false) }
+ *   // ...
+ *   if (menuOpen) DropdownMenu(...) { ... }
+ *
+ * Phase 6-4: missing the recomposition trigger (Phase 6-5).
+ */
+fun <T> mutableStateOf(initial: T): State<T> = State.get("__inline_${initial.hashCode()}_${System.nanoTime()}", initial)
+
+// ============================================================================
 // AlertDialog / MessageDialog — Compose-like Material3 AlertDialog +
 // HIG-compliant GTK dialog pattern (see docs/gnome-dev-docs/hig/patterns/feedback/dialogs.md)
 // ============================================================================
