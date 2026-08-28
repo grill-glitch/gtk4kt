@@ -42,7 +42,7 @@ data class Game(
 )
 
 fun LibraryScreen() {
-    val activeNav = remember("navPage", NavPage.Settings)
+    val activeNav = remember("navPage", NavPage.Library)
     val games = remember("games", SAMPLE_GAMES)
     val settingsRoot = remember("settingsRoot", "/home/user/games")
     val settingsAutoScan = remember("settingsAutoScan", true)
@@ -287,7 +287,7 @@ private fun BoxBuilder.SettingsPage(
         // One PreferencesGroup per concern, with a hairline between groups.
         // Each row is a flat "action-row" with title/subtitle/suffix.
         column {
-            Text("Library", modifier = Modifier.Empty.classes(Design.CLS_SECTION_TITLE))
+            Text("LIBRARY", modifier = Modifier.Empty.classes(Design.CLS_SECTION_TITLE))
             SettingsRow(
                     title = "Game folder",
                     description = root.value,
@@ -298,7 +298,7 @@ private fun BoxBuilder.SettingsPage(
                     })
                 }
             Divider(modifier = Modifier.Empty.classes(Design.CLS_GROUP_SEPARATOR))
-            Text("Behaviour", modifier = Modifier.Empty.classes(Design.CLS_SECTION_TITLE))
+            Text("BEHAVIOUR", modifier = Modifier.Empty.classes(Design.CLS_SECTION_TITLE))
             SettingsRow(
                     title = "Scan on startup",
                     description = "Detect engines when ika opens.",
@@ -313,7 +313,7 @@ private fun BoxBuilder.SettingsPage(
                     Switch(checked = showRecent.value, onCheckedChange = onShowRecentChange)
                 }
             Divider(modifier = Modifier.Empty.classes(Design.CLS_GROUP_SEPARATOR))
-            Text("About", modifier = Modifier.Empty.classes(Design.CLS_SECTION_TITLE))
+            Text("ABOUT", modifier = Modifier.Empty.classes(Design.CLS_SECTION_TITLE))
             SettingsRow(
                     title = "Version",
                     description = "ika 0.1.0 · gtk4kt port",

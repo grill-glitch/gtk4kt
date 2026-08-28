@@ -9,9 +9,11 @@ name = "gtk4kt_native"
 
 [dependencies]
 # gtk3-rs has gtk_main() / gtk_main_quit() — gtk4-rs removed them
-gtk = { version = "0.18", features = ["v3_24"] }
+gtk = { version = "0.11", package = "gtk4" }
+libadwaita = { version = "0.9", features = ["v1_4"] }
+# Keep cairo-rs 0.18 since gtk4 0.11 still uses it
 cairo-rs = { version = "0.18", features = ["use_glib", "png"] }
-glib = { version = "0.22" }
+glib = "0.22"
 gio = { version = "0.22" }
 log = "0.4"
 env_logger = "0.11"

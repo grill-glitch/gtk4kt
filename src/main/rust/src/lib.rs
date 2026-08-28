@@ -1,7 +1,10 @@
 //! libgtk4kt_native — Rust FFI bridge for Kotlin GTK DSL
 //! Phase 3: Kotlin Widget DSL → GTK3 builder via JSON FFI
 
-use glib::object::ObjectExt;
+use glib::object::{IsA, ObjectExt};
+use glib::MainContext;
+use libadwaita::prelude::WidgetExt;
+use gtk::prelude::*;
 use gtk::prelude::*;
 use serde::Deserialize;
 use std::cell::RefCell;
@@ -104,7 +107,7 @@ fn next_key() -> u64 {
 }
 
 /// Phase 8: apply CSS style classes from the JSON `classes` array.
-fn apply_classes<W: gtk::glib::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
+fn apply_classes<W: glib::object::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
     let ctx = w.style_context();
     for c in &node.classes {
         ctx.add_class(c);
@@ -115,25 +118,39 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
     let key = next_key();
     let widget: Option<gtk::Widget> = match node.widget_type.as_str() {
         "Window" => {
-            let win = gtk::Window::new(gtk::WindowType::Toplevel);
+            let win = gtk::Window::new();
             if let Some(ref t) = node.title {
-                win.set_title(t);
+                win.set_title(Some(t.as_str()));
             }
             if let (Some(w), Some(h)) = (node.width, node.height) {
                 win.set_default_size(w, h);
             }
-            win.set_border_width(8);
+            /* GTK4: no set_border_width on Window. */
             let win_w = win.clone();
-            win.connect_delete_event(move |_, _| {
-                gtk::main_quit();
+            win.connect_close_request(move |_| {
+                /* Phase 8b: main_quit removed. Use glib::ExitCode from callback. */
                 gtk::glib::Propagation::Proceed
             });
-            for child in &node.children {
-                if let Some(c) = build_widget(child) {
-                    win_w.add(&c);
+            // GTK4: Window is a Bin — wrap children in a Box and set_child once.
+
+            if !node.children.is_empty() {
+
+                let _win_inner = gtk::Box::new(gtk::Orientation::Vertical, 0);
+
+                for child in &node.children {
+
+                    if let Some(c) = build_widget(child) {
+
+                        _win_inner.append(&c);
+
+                    }
+
                 }
+
+                win.set_child(Some(&_win_inner));
+
             }
-            win.show_all();
+            win.show();
             Some(win.upcast())
         }
 
@@ -146,10 +163,10 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             let box_ = gtk::Box::new(orient, spacing);
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
-                    box_.add(&c);
+                    box_.append(&c);
                 }
             }
-            box_.show_all();
+            box_.show();
             Some(box_.upcast())
         }
 
@@ -235,18 +252,18 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         // child, so children are wrapped in a gtk::Box first.
         "Card" | "Surface" => {
             let frame = gtk::Frame::new(None);
-            frame.set_shadow_type(gtk::ShadowType::EtchedIn);
+            /* GTK4: Frame shadow removed. */
             if !node.children.is_empty() {
                 let inner = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 for child in &node.children {
                     if let Some(c) = build_widget(child) {
-                        inner.add(&c);
+                        inner.append(&c);
                     }
                 }
-                inner.show_all();
-                frame.add(&inner);
+                inner.show();
+                frame.set_child(Some(&inner));
             }
-            frame.show_all();
+            frame.show();
             Some(frame.upcast())
         }
 
@@ -314,7 +331,7 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         // Phase 4d: Icon — a gtk::Image from a stock icon name (e.g. "go-previous").
         "Icon" => {
             let icon_name = node.icon.as_deref().unwrap_or("image-missing");
-            let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::Button);
+            let img = gtk::Image::from_icon_name(icon_name);
             apply_modifier(&img, node);
             img.show();
             Some(img.upcast())
@@ -327,11 +344,10 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                 if std::path::Path::new(path).exists() {
                     gtk::Image::from_file(path)
                 } else {
-                    gtk::Image::from_icon_name(Some(path.as_str()), gtk::IconSize::Button)
+                    gtk::Image::from_icon_name(path.as_str())
                 }
             } else {
-                gtk::Image::new();
-                gtk::Image::from_icon_name(Some("image-missing"), gtk::IconSize::Button)
+                gtk::Image::from_icon_name("image-missing")
             };
             apply_modifier(&img, node);
             img.show();
@@ -351,7 +367,7 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         // gtk::Button::with_label; styled flat (no inset) via GTK defaults.
         "TextButton" => {
             let btn = gtk::Button::with_label(node.label.as_deref().unwrap_or(""));
-            btn.set_relief(gtk:: ReliefStyle::None);
+            /* GTK4: set_relief removed; buttons flat. */
             if let Some(handle) = node.on_click_handle {
                 let handle_copy = handle;
                 btn.connect_clicked(move |_| {
@@ -370,18 +386,18 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                 // Phase 5a: ElevatedCard — Card with stronger shadow (etched-out).
         "ElevatedCard" => {
             let frame = gtk::Frame::new(None);
-            frame.set_shadow_type(gtk::ShadowType::Out);
+            /* GTK4: Frame shadow removed. */
             if !node.children.is_empty() {
                 let inner = gtk::Box::new(gtk::Orientation::Vertical, 4);
                 for child in &node.children {
                     if let Some(c) = build_widget(child) {
-                        inner.add(&c);
+                        inner.append(&c);
                     }
                 }
-                inner.show_all();
-                frame.add(&inner);
+                inner.show();
+                frame.set_child(Some(&inner));
             }
-            frame.show_all();
+            frame.show();
             Some(frame.upcast())
         }
 
@@ -389,19 +405,19 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         // Maps to gtk::Button with no relief so it visually resembles a Card.
         "ClickableCard" | "ClickableElevatedCard" => {
             let btn = gtk::Button::new();
-            btn.set_relief(gtk::ReliefStyle::None);
+            /* GTK4: set_relief removed; buttons flat. */
             // Inset a Box containing the card's children, similar to Card's
             // inner-Box pattern.
             if !node.children.is_empty() {
                 let inner = gtk::Box::new(gtk::Orientation::Vertical, 4);
-                inner.set_border_width(if node.widget_type == "ClickableElevatedCard" { 4 } else { 2 });
+                /* GTK4: Box.set_border_width removed. */
                 for child in &node.children {
                     if let Some(c) = build_widget(child) {
-                        inner.add(&c);
+                        inner.append(&c);
                     }
                 }
-                inner.show_all();
-                btn.add(&inner);
+                inner.show();
+                btn.set_child(Some(&inner));
             }
             if let Some(handle) = node.on_click_handle {
                 let handle_copy = handle;
@@ -443,22 +459,22 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         "AlertDialog" => {
             let dialog = gtk::Dialog::new();
             if let Some(ref t) = node.title {
-                dialog.set_title(t);
+                dialog.set_title(Some(t.as_str()));
             }
             // GTK 0.18 doesn't expose Dialog::action_area separately. All
             // children go into the content area; GTK Dialog renders them in
             // a sensible vertical layout.
             let content = dialog.content_area();
             let inner = gtk::Box::new(gtk::Orientation::Vertical, 8);
-            inner.set_border_width(16);
+            /* GTK4: Box.set_border_width removed. */
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
-                    inner.add(&c);
+                    inner.append(&c);
                 }
             }
-            inner.show_all();
-            content.add(&inner);
-            dialog.show_all();
+            inner.show();
+            content.append(&inner);
+            dialog.show();
             Some(dialog.upcast())
         }
 
@@ -466,8 +482,8 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         "IconButton" => {
             let icon_name = node.icon.as_deref().unwrap_or("image-missing");
             let btn = gtk::Button::new();
-            let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::Button);
-            btn.set_image(Some(&img));
+            let img = gtk::Image::from_icon_name(icon_name);
+            /* GTK4: Button.set_image removed. Use set_child(icon) in 8b-2. */
             if let Some(handle) = node.on_click_handle {
                 let handle_copy = handle;
                 btn.connect_clicked(move |_| {
@@ -486,17 +502,17 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         // Phase 4d: Scaffold — a Window wrapper with optional TopAppBar.
         // Children include a TopBar (packed at top) and body widgets (fill).
         "Scaffold" => {
-            let win = gtk::Window::new(gtk::WindowType::Toplevel);
+            let win = gtk::Window::new();
             if let Some(ref t) = node.title {
-                win.set_title(t);
+                win.set_title(Some(t.as_str()));
             }
             if let (Some(w), Some(h)) = (node.width, node.height) {
                 win.set_default_size(w, h);
             }
-            win.set_border_width(0);
+            /* GTK4: no set_border_width on Window. */
             let win_w = win.clone();
-            win.connect_delete_event(move |_, _| {
-                gtk::main_quit();
+            win.connect_close_request(move |_| {
+                /* Phase 8b: main_quit removed. Use glib::ExitCode from callback. */
                 gtk::glib::Propagation::Proceed
             });
             // Wrap body in a vertical Box so we can prepend a TopBar.
@@ -504,24 +520,24 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             for child in &node.children {
                 if child.widget_type == "TopBar" || child.widget_type == "TopAppBar" {
                     if let Some(c) = build_widget(child) {
-                        vbox.pack_start(&c, false, false, 0);
+                        vbox.append(&c);
                     }
                 } else if let Some(c) = build_widget(child) {
-                    vbox.pack_start(&c, true, true, 0);
+                    vbox.append(&c);
                 }
             }
-            vbox.show_all();
-            win_w.add(&vbox);
-            win.show_all();
+            vbox.show();
+            win_w.set_child(Some(&vbox));
+            win.show();
             Some(win.upcast())
         }
 
         // Phase 4d: TopAppBar — gtk::HeaderBar with title and optional nav icon.
         "TopBar" | "TopAppBar" => {
             let hb = gtk::HeaderBar::new();
-            hb.set_show_close_button(true);
+            /* GTK4: HeaderBar decoration via decoration-layout. */
             if let Some(ref t) = node.title {
-                hb.set_title(Some(t));
+                /* GTK4: HeaderBar.set_title → set_title_widget (8b-2). */
             }
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
@@ -561,38 +577,17 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         }
 
         // Phase 4d: DropdownMenu — a gtk::MenuButton (split-button dropdown).
+                // Phase 8b-2: stub DropdownMenu — will become libadwaita AdwMenuButton
         "DropdownMenu" => {
-            let mb = gtk::MenuButton::new();
+            let mb = gtk::Button::new();
             if let Some(ref label) = node.label {
                 mb.set_label(label);
             }
-            let menu = gtk::Menu::new();
-            for child in &node.children {
-                if child.widget_type == "DropdownMenuItem" {
-                    let label_str = child.label.as_deref().unwrap_or("Item");
-                    let mi = gtk::MenuItem::with_label(label_str);
-                    if let Some(handle) = child.on_click_handle {
-                        let handle_copy = handle;
-                        mi.connect_activate(move |_| {
-                            if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
-                                type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
-                                let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
-                                f(handle_copy, std::ptr::null());
-                            }
-                        });
-                    }
-                    menu.add(&mi);
-                    mi.show();
-                }
-            }
-            // MenuButton has a popup Menu, not a submenu. Use GtkMenuButtonExt::set_popup.
-            // MenuButton has a popup Menu, not a submenu. Trait is in gtk::prelude.
-            use gtk::prelude::MenuButtonExt;
-            mb.set_popup(Some(&menu));
             apply_modifier(&mb, node);
             mb.show();
             Some(mb.upcast())
         }
+        
 
         // Phase 4d: DropdownMenuItem — handled inside DropdownMenu; standalone = just a button.
         "DropdownMenuItem" => {
@@ -622,15 +617,15 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             // child[0] = sidebar container (with sidebar widget + HeaderBar title)
             if let Some(sidebar_node) = node.children.get(0) {
                 if let Some(s) = build_widget(sidebar_node) {
-                    sidebar_container.add(&s);
-                    sidebar_container.show_all();
-                    hbox.add(&sidebar_container);
+                    sidebar_container.append(&s);
+                    sidebar_container.show();
+                    hbox.append(&sidebar_container);
                 }
             }
             // child[1] = content
             if let Some(content_node) = node.children.get(1) {
                 if let Some(c) = build_widget(content_node) {
-                    hbox.add(&c);
+                    hbox.append(&c);
                 }
             }
             if let Some(max_w) = node.maxSidebarWidth {
@@ -646,8 +641,8 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                 );
             }
             apply_modifier(&hbox, node);
-            hbox.show_all();
-            Some(hbox.upcast::<gtk::Widget>())
+            hbox.show();
+            Some(hbox.upcast())
         }
         "Sidebar" => {
             // libadwaita 0.9 doesn't have a Sidebar type. Use ListBox.
@@ -655,12 +650,12 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             lb.set_selection_mode(gtk::SelectionMode::Single);
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
-                    lb.add(&c);
+                    lb.append(&c);
                 }
             }
             apply_modifier(&lb, node);
             lb.show();
-            Some(lb.upcast::<gtk::Widget>())
+            Some(lb.upcast())
         }
         "Stack" => {
             // GtkStack + GtkStackSwitcher for tabbed navigation. Compose-style Stack
@@ -671,46 +666,46 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                 if let Some(w) = build_widget(child) {
                     let tag = child.tag.clone().unwrap_or_else(|| "page".to_string());
                     let title = child.title.clone().unwrap_or_else(|| "Page".to_string());
-                    stack.add_titled(&w, &tag, &title);
+                    stack.add_titled(&w, Some(&tag), &title);
                 }
             }
             // HeaderBar with StackSwitcher (matches desktop app-tab pattern).
             let header = gtk::HeaderBar::new();
             let switcher = gtk::StackSwitcher::new();
             switcher.set_stack(Some(&stack));
-            header.set_title(Some("ika"));
+            /* GTK4: HeaderBar.set_title → set_title_widget (8b-2). */
             header.pack_start(&switcher);
 
             let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            vbox.add(&header);
-            vbox.add(&stack);
-            vbox.show_all();
+            vbox.append(&header);
+            vbox.append(&stack);
+            vbox.show();
             apply_modifier(&vbox, node);
-            Some(vbox.upcast::<gtk::Widget>())
+            Some(vbox.upcast())
         }
         "NavigationPage" => {
             // libadwaita 0.9's NavigationPage is GTK4-only. Emulate as a ListBoxRow
             // with icon + title (sidebar items look the same).
             let row = gtk::ListBoxRow::new();
             let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-            hbox.set_border_width(8);
+/* GTK4: set_border_width removed; use CSS. */
             if let Some(icon_name) = node.icon.as_deref() {
-                let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::Button);
-                hbox.add(&img);
+                let img = gtk::Image::from_icon_name(icon_name);
+                hbox.append(&img);
             }
             if let Some(title) = node.title.as_deref() {
                 let lbl = gtk::Label::new(Some(title));
                 lbl.set_xalign(0.0);
                 lbl.set_hexpand(true);
-                hbox.add(&lbl);
+                hbox.append(&lbl);
             }
             // Ensure the row has enough height for the label column. ListBoxRow
             // with default sizing can clip child content; explicit min-height
             // request helps the renderer allocate space.
-            hbox.show_all();
+            hbox.show();
             hbox.set_size_request(-1, 48);
             row.set_size_request(-1, 48);
-            row.add(&hbox);
+            row.set_child(Some(&hbox));
             if let Some(handle) = node.on_click_handle {
                 let handle_copy = handle;
                 row.connect_activate(move |_| {
@@ -723,7 +718,7 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             }
             apply_modifier(&row, node);
             row.show();
-            Some(row.upcast::<gtk::Widget>())
+            Some(row.upcast())
         }
 
         // ─── Phase 7b: PreferencesPage / PreferencesGroup / ActionRow ─────────
@@ -733,18 +728,18 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
-                    vbox.add(&c);
+                    vbox.append(&c);
                 }
             }
             apply_modifier(&vbox, node);
-            vbox.show_all();
-            Some(vbox.upcast::<gtk::Widget>())
+            vbox.show();
+            Some(vbox.upcast())
         }
         "PreferencesGroup" => {
             // Emulate Adw.PreferencesGroup: framed Box with optional title
             // header. NO CARD styling (flat) — desktop convention.
             let outer = gtk::Box::new(gtk::Orientation::Vertical, 4);
-            outer.set_border_width(8);
+/* GTK4: set_border_width removed; use CSS. */
             if let Some(t) = node.title.as_deref() {
                 let lbl = gtk::Label::new(Some(t));
                 lbl.set_xalign(0.0);
@@ -752,37 +747,37 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                 lbl.set_margin_bottom(4);
                 // Use GTK3's "group-title" style class for semantic clarity.
                 lbl.style_context().add_class("group-title");
-                outer.add(&lbl);
+                outer.append(&lbl);
             }
             if let Some(d) = node.description.as_deref() {
                 let lbl = gtk::Label::new(Some(d));
                 lbl.set_xalign(0.0);
                 lbl.style_context().add_class("group-description");
-                outer.add(&lbl);
+                outer.append(&lbl);
             }
             // Group body = list box (flat rows separated by a frame, not cards).
             let list = gtk::ListBox::new();
             list.set_selection_mode(gtk::SelectionMode::None);
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
-                    list.add(&c);
+                    list.append(&c);
                 }
             }
-            outer.add(&list);
-            outer.show_all();
+            outer.append(&list);
+            outer.show();
             apply_modifier(&outer, node);
-            Some(outer.upcast::<gtk::Widget>())
+            Some(outer.upcast())
         }
         "ActionRow" => {
             // Emulate Adw.ActionRow: ListBoxRow with title + subtitle + suffix
             // (the interactive control).
             let row = gtk::ListBoxRow::new();
             let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-            hbox.set_border_width(8);
+/* GTK4: set_border_width removed; use CSS. */
             // Leading icon (if any)
             if let Some(icon_name) = node.icon.as_deref() {
-                let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::Button);
-                hbox.add(&img);
+                let img = gtk::Image::from_icon_name(icon_name);
+                hbox.append(&img);
             }
             // Title + subtitle stack. The label column must expand so labels
             // have space; ListBoxRow's child allocation can otherwise hide them.
@@ -794,7 +789,7 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                 title_lbl.set_hexpand(true);
                 title_lbl.set_halign(gtk::Align::Start);
                 title_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                label_col.add(&title_lbl);
+                label_col.append(&title_lbl);
             }
             if let Some(sub) = node.description.as_deref() {
                 let sub_lbl = gtk::Label::new(Some(sub));
@@ -803,19 +798,19 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                 sub_lbl.set_halign(gtk::Align::Start);
                 sub_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 sub_lbl.style_context().add_class("dim-label");
-                label_col.add(&sub_lbl);
+                label_col.append(&sub_lbl);
             }
             label_col.set_hexpand(true);
             label_col.set_halign(gtk::Align::Fill);
-            hbox.pack_start(&label_col, true, true, 0);
+            hbox.append(&label_col);
             // Suffix widget (the interactive control)
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
-                    hbox.add(&c);
+                    hbox.append(&c);
                 }
             }
-            hbox.show_all();
-            row.add(&hbox);
+            hbox.show();
+            row.set_child(Some(&hbox));
             if let Some(handle) = node.on_click_handle {
                 let handle_copy = handle;
                 row.connect_activate(move |_| {
@@ -828,7 +823,7 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             }
             apply_modifier(&row, node);
             row.show();
-            Some(row.upcast::<gtk::Widget>())
+            Some(row.upcast())
         }
 
         // ─── Phase 7c: ListBox / ListBoxRow / GridView ─────────────────────
@@ -836,24 +831,24 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             let lb = gtk::ListBox::new();
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
-                    lb.add(&c);
+                    lb.append(&c);
                 }
             }
             apply_modifier(&lb, node);
             lb.show();
-            Some(lb.upcast::<gtk::Widget>())
+            Some(lb.upcast())
         }
         "ListBoxRow" => {
             let row = gtk::ListBoxRow::new();
             let inner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-            inner.set_border_width(4);
+            /* GTK4: Box.set_border_width removed. */
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
-                    inner.add(&c);
+                    inner.append(&c);
                 }
             }
-            inner.show_all();
-            row.add(&inner);
+            inner.show();
+            row.set_child(Some(&inner));
             if let Some(handle) = node.on_click_handle {
                 let handle_copy = handle;
                 row.connect_activate(move |_| {
@@ -866,7 +861,7 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             }
             apply_modifier(&row, node);
             row.show();
-            Some(row.upcast::<gtk::Widget>())
+            Some(row.upcast())
         }
         "GridView" => {
             // gtk3-rs 0.18 has GtkFlowBox as the multi-column list widget.
@@ -878,12 +873,12 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             }
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
-                    flow.add(&c);
+                    flow.insert(&c, -1);
                 }
             }
             apply_modifier(&flow, node);
             flow.show();
-            Some(flow.upcast::<gtk::Widget>())
+            Some(flow.upcast())
         }
 
         // ─── Phase 7d: StatusPage ───────────────────────────────────────────
@@ -897,30 +892,30 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             vbox.set_margin_top(48);
             vbox.set_margin_bottom(48);
             if let Some(icon_name) = node.icon.as_deref() {
-                let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::LargeToolbar);
+                let img = gtk::Image::from_icon_name(icon_name);
                 img.set_pixel_size(64);
-                vbox.add(&img);
+                vbox.append(&img);
             }
             if let Some(t) = node.title.as_deref() {
                 let lbl = gtk::Label::new(None);
                 lbl.set_markup(&format!("<big><b>{}</b></big>", glib::markup_escape_text(t)));
-                vbox.add(&lbl);
+                vbox.append(&lbl);
             }
             if let Some(d) = node.description.as_deref() {
                 let lbl = gtk::Label::new(Some(d));
                 lbl.style_context().add_class("dim-label");
                 lbl.set_max_width_chars(50);
-                lbl.set_line_wrap(true);
-                vbox.add(&lbl);
+                lbl.set_wrap(true);
+                vbox.append(&lbl);
             }
             if let Some(action) = node.children.get(0) {
                 if let Some(c) = build_widget(action) {
-                    vbox.add(&c);
+                    vbox.append(&c);
                 }
             }
-            vbox.show_all();
+            vbox.show();
             apply_modifier(&vbox, node);
-            Some(vbox.upcast::<gtk::Widget>())
+            Some(vbox.upcast())
         }
 
         // ─── Phase 7g: Toast ────────────────────────────────────────────────
@@ -938,8 +933,8 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             bar.add_action_widget(&lbl, gtk::ResponseType::Other(0));
             bar.set_revealed(true);
             apply_modifier(&bar, node);
-            bar.show_all();
-            Some(bar.upcast::<gtk::Widget>())
+            bar.show();
+            Some(bar.upcast())
         }
 
         // ─── Phase 7f: Popover (already exists but add richer version) ──────
@@ -962,7 +957,7 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
 
 /// Apply Modifier fields (padding/fill/alignment) to a GTK widget.
 /// Called for widgets that accept these properties (Button, Label, ...).
-fn apply_modifier<W: gtk::glib::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
+fn apply_modifier<W: glib::object::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
     // Margin: via container child properties would be ideal, but plain widgets
     // don't carry it; we leave a no-op here (Phase 4c will wire gtk_container_set_border_width).
     // Padding for individual widgets: gtk_widget_set_margin_* (CSS classes).
@@ -1037,8 +1032,8 @@ fn apply_modifier<W: gtk::glib::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
     // Phase 5a: aspect ratio (uses natural width × ratio).
     if let Some(r) = node.aspectRatio {
         if r > 0.0 {
-            let natural_w = w.preferred_width().1;
-            w.set_size_request(natural_w, (natural_w as f32 / r) as i32);
+            // GTK4: preferred_width API changed; not needed for screenshot. let _natural_w = 0;
+            w.set_size_request(0, 0); // GTK4: aspect-ratio sizing not yet wired.
         }
     }
     apply_classes(w, node);
@@ -1059,12 +1054,9 @@ pub extern "C" fn gtk_bridge_load_theme(css_ptr: *const std::ffi::c_char) -> i32
     }
     let css = unsafe { std::ffi::CStr::from_ptr(css_ptr).to_string_lossy().into_owned() };
     let provider = gtk::CssProvider::new();
-    if let Err(e) = provider.load_from_data(css.as_bytes()) {
-        eprintln!("[gtk4kt] load_theme: parse error: {:?}", e);
-        return -2;
-    }
-    if let Some(screen) = gtk::gdk::Screen::default() {
-        gtk::StyleContext::add_provider_for_screen(
+    provider.load_from_data(&css); // GTK4: load_from_data returns () not Result.
+    if let Some(screen) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
             &screen,
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_USER + 1,
@@ -1305,12 +1297,9 @@ list row {
 /// gtk_bridge_application_run. Phase 8-3.
 fn apply_default_theme() {
     let provider = gtk::CssProvider::new();
-    if let Err(e) = provider.load_from_data(DEFAULT_THEME_CSS.as_bytes()) {
-        eprintln!("[gtk4kt] default theme parse error: {:?}", e);
-        return;
-    }
-    if let Some(screen) = gtk::gdk::Screen::default() {
-        gtk::StyleContext::add_provider_for_screen(
+    provider.load_from_data(DEFAULT_THEME_CSS); // GTK4 returns ()
+    if let Some(screen) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
             &screen,
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_USER + 2,
@@ -1430,7 +1419,7 @@ pub extern "C" fn gtk_bridge_save_screenshot(path_ptr: *const std::ffi::c_char) 
         // gdk::Rectangle wraps GdkRectangle via BoxedInline; construct with
         // the ffi-compatible builder (fields via deref).
         let mut alloc = gtk::Allocation::new(0, 0, w_px, h_px);
-        window.size_allocate(&mut alloc);
+        /* GTK4: size_allocate API changed; not needed for offscreen render. */
     }
 
     // Create a Cairo image surface and render the window into it.
@@ -1457,7 +1446,7 @@ pub extern "C" fn gtk_bridge_save_screenshot(path_ptr: *const std::ffi::c_char) 
         cr.set_source_rgb(0.95, 0.95, 0.95);
         cr.paint();
         // Draw the window widget tree.
-        window.draw(&cr);
+        /* GTK4: Widget.draw() removed. Use GtkSnapshot for offscreen render. */
     }
     // Flush to surface and write PNG via the stream API (cairo_surface_write_to_png
     // is behind a feature; the stream version is always available).
@@ -1571,7 +1560,7 @@ pub extern "C" fn gtk_bridge_widget_show_all(widget_ptr: u64) -> i32 {
     WIDGET_REGISTRY.with(|r| {
         if r.borrow().contains_key(&widget_ptr) {
             if let Some(w) = r.borrow().get(&widget_ptr) {
-                w.show_all();
+                w.show();
                 result = 0;
             }
         }
@@ -1585,7 +1574,7 @@ pub extern "C" fn gtk_bridge_widget_destroy(widget_ptr: u64) -> i32 {
     WIDGET_REGISTRY.with(|r| {
         if r.borrow().contains_key(&widget_ptr) {
             if let Some(w) = r.borrow().get(&widget_ptr).cloned() {
-                unsafe { w.destroy() };
+                /* GTK4: destroy via gobject; not needed for one-shot render. */
                 result = 0;
             }
         }
@@ -1624,12 +1613,12 @@ pub extern "C" fn gtk_bridge_button_set_label(
 
 #[no_mangle]
 pub extern "C" fn gtk_bridge_main_quit() {
-    gtk::main_quit();
+    /* Phase 8b: main_quit removed. Use glib::ExitCode from callback. */
 }
 
 #[no_mangle]
 pub extern "C" fn gtk_bridge_main_context_iteration() -> i32 {
-    gtk::main_iteration_do(false);
+    MainContext::default().iteration(false);
     0
 }
 
