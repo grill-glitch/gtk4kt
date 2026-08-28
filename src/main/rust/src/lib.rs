@@ -71,6 +71,14 @@ pub struct WidgetNode {
     // ─── Phase 4d: icon / placeholder ─────────────────────────────────────
     #[serde(default)] pub icon: Option<String>,
     #[serde(default)] pub placeholder: Option<String>,
+
+    // ─── Phase 5a: Compose-completeness modifiers ─────────────────────────
+    #[serde(default)] pub bgColor: Option<i32>,
+    #[serde(default)] pub aspectRatio: Option<f32>,
+    #[serde(default)] pub verticalScroll: Option<bool>,
+    #[serde(default)] pub hWeight: Option<f32>,
+    #[serde(default)] pub vWeight: Option<f32>,
+    #[serde(default)] pub alignmentCrossAxis: Option<i32>,
 }
 
 // ─── Widget builder ─────────────────────────────────────────────────────────
@@ -290,6 +298,115 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             Some(img.upcast())
         }
 
+        // Phase 5a: Image — Image::from_file(path) when icon is an absolute path,
+        // else Image::from_icon_name as a fallback.
+        "Image" => {
+            let img = if let Some(ref path) = node.icon {
+                if std::path::Path::new(path).exists() {
+                    gtk::Image::from_file(path)
+                } else {
+                    gtk::Image::from_icon_name(Some(path.as_str()), gtk::IconSize::Button)
+                }
+            } else {
+                gtk::Image::new();
+                gtk::Image::from_icon_name(Some("image-missing"), gtk::IconSize::Button)
+            };
+            apply_modifier(&img, node);
+            img.show();
+            Some(img.upcast())
+        }
+
+        // Phase 5a: Spinner — animated indeterminate progress indicator.
+        "Spinner" => {
+            let sp = gtk::Spinner::new();
+            sp.start();
+            apply_modifier(&sp, node);
+            sp.show();
+            Some(sp.upcast())
+        }
+
+        // Phase 5a: TextButton — minimal-styling button. Rendered as a
+        // gtk::Button::with_label; styled flat (no inset) via GTK defaults.
+        "TextButton" => {
+            let btn = gtk::Button::with_label(node.label.as_deref().unwrap_or(""));
+            btn.set_relief(gtk:: ReliefStyle::None);
+            if let Some(handle) = node.on_click_handle {
+                let handle_copy = handle;
+                btn.connect_clicked(move |_| {
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        f(handle_copy, std::ptr::null());
+                    }
+                });
+            }
+            apply_modifier(&btn, node);
+            btn.show();
+            Some(btn.upcast())
+        }
+
+        // Phase 5a: ElevatedCard — Card with stronger shadow (etched-out).
+        "ElevatedCard" => {
+            let frame = gtk::Frame::new(None);
+            frame.set_shadow_type(gtk::ShadowType::Out);
+            if !node.children.is_empty() {
+                let inner = gtk::Box::new(gtk::Orientation::Vertical, 4);
+                for child in &node.children {
+                    if let Some(c) = build_widget(child) {
+                        inner.add(&c);
+                    }
+                }
+                inner.show_all();
+                frame.add(&inner);
+            }
+            frame.show_all();
+            Some(frame.upcast())
+        }
+
+        // Phase 5a: FloatingActionButton — rounded-corner button with shadow.
+        // Rendered as a standard Button; CSS class hook will be added in 5b.
+        "FloatingActionButton" => {
+            let btn = gtk::Button::with_label(node.label.as_deref().unwrap_or(""));
+            btn.set_size_request(56, 56);  // Material FAB default size
+            if let Some(handle) = node.on_click_handle {
+                let handle_copy = handle;
+                btn.connect_clicked(move |_| {
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        f(handle_copy, std::ptr::null());
+                    }
+                });
+            }
+            apply_modifier(&btn, node);
+            btn.show();
+            Some(btn.upcast())
+        }
+
+        // Phase 5a: AlertDialog — a modal window with title/text/buttons.
+        // Maps to gtk::Dialog with action_area + content_area (HIG-compliant).
+        "AlertDialog" => {
+            let dialog = gtk::Dialog::new();
+            if let Some(ref t) = node.title {
+                dialog.set_title(t);
+            }
+            // GTK 0.18 doesn't expose Dialog::action_area separately. All
+            // children go into the content area; GTK Dialog renders them in
+            // a sensible vertical layout.
+            let content = dialog.content_area();
+            let inner = gtk::Box::new(gtk::Orientation::Vertical, 8);
+            inner.set_border_width(16);
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    inner.add(&c);
+                }
+            }
+            inner.show_all();
+            content.add(&inner);
+            dialog.show_all();
+            Some(dialog.upcast())
+        }
+
         // Phase 4d: IconButton — a gtk::Button with an Icon as its image.
         "IconButton" => {
             let icon_name = node.icon.as_deref().unwrap_or("image-missing");
@@ -506,6 +623,17 @@ fn apply_modifier<W: gtk::glib::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
             3 => gtk::Align::Fill,
             _ => gtk::Align::Start,
         });
+    }
+    // Phase 5a: background color — placeholder until Phase 5b CSS classes.
+    if let Some(_c) = node.bgColor {
+        // No-op for now; will be replaced by gtk_widget_set_css_name() in 5b.
+    }
+    // Phase 5a: aspect ratio (uses natural width × ratio).
+    if let Some(r) = node.aspectRatio {
+        if r > 0.0 {
+            let natural_w = w.preferred_width().1;
+            w.set_size_request(natural_w, (natural_w as f32 / r) as i32);
+        }
     }
 }
 

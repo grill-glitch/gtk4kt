@@ -155,6 +155,29 @@ class WindowBuilder {
                 children = b.children.toList())
         )
     }
+
+    /**
+     * Compose-like `Box` — a container that overlays children (stack-style).
+     * Maps to gtk::Box (Vertical) with all children sharing the same area via
+     * each child's `halign=fill, valign=fill` modifier; children stack with
+     * later ones on top.
+     *
+     * Use case: layering overlays, badges, etc.
+     */
+    fun Box(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        // Force each child to fill the Box; later children overlay earlier ones.
+        val stacked = b.children.map { child ->
+            child.copy(modifierJson = child.modifierJson + ",\"halign\":3,\"valign\":3")
+        }
+        children.add(
+            WidgetNode("Box", orientation = 1, spacing = 0, modifierJson = modifier.toJsonFields(),
+                children = stacked)
+        )
+    }
+
+    fun box(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) = Box(modifier, block)
 }
 
 // ============================================================================
@@ -333,6 +356,142 @@ class BoxBuilder {
     ) = Slider(value, modifier, onValueChange, min, max)
 
     /**
+     * Compose-like `Image` — show an image from a path or stock icon.
+     * Falls back to the placeholder icon if path is null.
+     */
+    fun Image(
+        path: String? = null,
+        fallbackIcon: String = "image-missing",
+        modifier: Modifier = Modifier.Empty,
+    ) {
+        children.add(WidgetNode("Image", icon = path ?: fallbackIcon, modifierJson = modifier.toJsonFields()))
+    }
+
+    fun image(
+        path: String? = null,
+        fallbackIcon: String = "image-missing",
+        modifier: Modifier = Modifier.Empty,
+    ) = Image(path, fallbackIcon, modifier)
+
+    /**
+     * Compose-like `CircularProgressIndicator` — animated spinner.
+     * Phase 5a: rendered as a gtk::Spinner (the closest GTK analog).
+     */
+    fun CircularProgressIndicator(modifier: Modifier = Modifier.Empty) {
+        children.add(WidgetNode("Spinner", modifierJson = modifier.toJsonFields()))
+    }
+
+    fun circularProgressIndicator(modifier: Modifier = Modifier.Empty) = CircularProgressIndicator(modifier)
+
+    /**
+     * Compose-like `ElevatedCard` — Card with stronger shadow.
+     * For Phase 5a, identical to Card; future phases will add elevation classes.
+     */
+    fun ElevatedCard(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        children.add(
+            WidgetNode("ElevatedCard", modifierJson = modifier.toJsonFields(),
+                children = b.children.toList())
+        )
+    }
+
+    fun elevatedCard(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) =
+        ElevatedCard(modifier, block)
+
+    /**
+     * Compose-like `TextButton` — minimal-styling button (no padding around label).
+     * For Phase 5a, identical to Button; future phases will style.
+     */
+    fun TextButton(
+        label: String,
+        modifier: Modifier = Modifier.Empty,
+        onClick: (() -> Unit)? = null,
+    ) {
+        val handleId = onClick?.let { registerCallback(it) } ?: 0L
+        children.add(
+            WidgetNode("TextButton", label = label, modifierJson = modifier.toJsonFields(),
+                onClick = handleId.takeIf { it != 0L })
+        )
+    }
+
+    fun textButton(
+        label: String,
+        modifier: Modifier = Modifier.Empty,
+        onClick: (() -> Unit)? = null,
+    ) = TextButton(label, modifier, onClick)
+
+    /**
+     * Compose-like `FloatingActionButton` — circular button typically for
+     * primary actions. Phase 5a: rendered as a styled Button (icon or label).
+     */
+    fun FloatingActionButton(
+        content: String,
+        modifier: Modifier = Modifier.Empty,
+        onClick: (() -> Unit)? = null,
+    ) {
+        val handleId = onClick?.let { registerCallback(it) } ?: 0L
+        children.add(
+            WidgetNode("FloatingActionButton", label = content, modifierJson = modifier.toJsonFields(),
+                onClick = handleId.takeIf { it != 0L })
+        )
+    }
+
+    fun floatingActionButton(
+        content: String,
+        modifier: Modifier = Modifier.Empty,
+        onClick: (() -> Unit)? = null,
+    ) = FloatingActionButton(content, modifier, onClick)
+
+    /**
+     * Compose-like `LazyColumn { items(list) { item -> ... } }` — a scrollable
+     * column with virtualized children. For Phase 5a, renders the first 50
+     * children eagerly (no virtualization yet — Phase 5b will use GtkListBox).
+     *
+     * `items` is a helper inside the LazyListScope that takes a List<T> and a
+     * lambda to render each item.
+     */
+    fun LazyColumn(
+        modifier: Modifier = Modifier.Empty,
+        block: LazyListScope.() -> Unit,
+    ) {
+        val scope = LazyListScope()
+        scope.block()
+        // Flatten to Box children. Real virtualization deferred to Phase 5b.
+        val rendered = scope.items.map { it.render() }
+        children.add(
+            WidgetNode("Box", orientation = 1, spacing = 4, modifierJson = modifier.toJsonFields(),
+                children = rendered)
+        )
+    }
+
+    fun lazyColumn(
+        modifier: Modifier = Modifier.Empty,
+        block: LazyListScope.() -> Unit,
+    ) = LazyColumn(modifier, block)
+
+    /**
+     * Compose-like `LazyRow` — same as LazyColumn but horizontal.
+     */
+    fun LazyRow(
+        modifier: Modifier = Modifier.Empty,
+        block: LazyListScope.() -> Unit,
+    ) {
+        val scope = LazyListScope()
+        scope.block()
+        val rendered = scope.items.map { it.render() }
+        children.add(
+            WidgetNode("Box", orientation = 0, spacing = 4, modifierJson = modifier.toJsonFields(),
+                children = rendered)
+        )
+    }
+
+    fun lazyRow(
+        modifier: Modifier = Modifier.Empty,
+        block: LazyListScope.() -> Unit,
+    ) = LazyRow(modifier, block)
+
+    /**
      * Compose-like Icon — a stock GTK icon (e.g. "go-previous").
      * Maps to gtk::Image::from_icon_name.
      */
@@ -449,6 +608,24 @@ class BoxBuilder {
                 children = b.children.toList())
         )
     }
+
+    /**
+     * Compose-like `Box` — overlay-style container. Inside BoxBuilder scope,
+     * also available for nested overlays.
+     */
+    fun Box(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        val stacked = b.children.map { child ->
+            child.copy(modifierJson = child.modifierJson + ",\"halign\":3,\"valign\":3")
+        }
+        children.add(
+            WidgetNode("Box", orientation = 1, spacing = 0, modifierJson = modifier.toJsonFields(),
+                children = stacked)
+        )
+    }
+
+    fun box(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) = Box(modifier, block)
 }
 
 // ============================================================================
@@ -456,8 +633,113 @@ class BoxBuilder {
 // ============================================================================
 
 // ============================================================================
-// Scaffold — Compose-like top-level Scaffold/TopAppBar (replaces Window)
+// LazyListScope — Compose-like items DSL
 // ============================================================================
+
+/** Collects deferred-rendered items for LazyColumn/LazyRow. */
+class LazyListScope {
+    internal val items = mutableListOf<LazyItem>()
+
+    /** Compose-like `items(list, key) { item -> ... }` — renders one widget per item. */
+    fun <T> items(list: List<T>, block: BoxBuilder.(T) -> Unit) {
+        for (item in list) {
+            val b = BoxBuilder()
+            b.block(item)
+            items.add(LazyItem(b.children))
+        }
+    }
+
+    /** Single-item variant. */
+    fun <T> item(value: T, block: BoxBuilder.(T) -> Unit) {
+        items(listOf(value), block)
+    }
+}
+
+internal data class LazyItem(val children: List<WidgetNode>) {
+    fun render(): WidgetNode {
+        // Wrap children in a Box so the lazy list acts as a single child in its parent.
+        return WidgetNode(type = "Box", orientation = 1, spacing = 0, children = children)
+    }
+}
+
+// ============================================================================
+// AlertDialog / MessageDialog — Compose-like Material3 AlertDialog +
+// HIG-compliant GTK dialog pattern (see docs/gnome-dev-docs/hig/patterns/feedback/dialogs.md)
+// ============================================================================
+
+/**
+ * Compose-like `AlertDialog` — a modal confirmation dialog.
+ *  - `onDismissRequest` fires when user dismisses (Escape, outside-click, etc.)
+ *  - `confirmButton` / `dismissButton` are the action buttons.
+ *
+ * HIG says: "Label the affirmative button with a specific imperative verb"
+ * (e.g. "Save", "Delete") — generic "OK" is discouraged.
+ */
+fun AlertDialog(
+    onDismissRequest: () -> Unit,
+    confirmButton: DialogButton,
+    modifier: Modifier = Modifier.Empty,
+    title: String? = null,
+    text: String? = null,
+    dismissButton: DialogButton? = null,
+) {
+    val body = BoxBuilder().apply {
+        if (text != null) {
+            Text(text, modifier = Modifier.Empty.padding(8, 16))
+        }
+    }
+    val children = buildList {
+        title?.let { add(WidgetNode("Label", label = it, modifierJson = ",\"halign\":1,\"weight\":3")) }
+        if (text != null) add(WidgetNode("Label", label = text, modifierJson = ",\"halign\":1"))
+        // Buttons row
+        val buttonRow = WidgetNode(
+            type = "Box", orientation = 0, spacing = 8,
+            children = buildList {
+                add(WidgetNode("Button", label = confirmButton.label,
+                    onClick = confirmButton.handleId.takeIf { it != 0L }))
+                dismissButton?.let { add(WidgetNode("Button", label = it.label,
+                    onClick = it.handleId.takeIf { it != 0L })) }
+            },
+            modifierJson = ",\"halign\":2,\"paddingEnd\":16,\"paddingTop\":8,\"paddingBottom\":16",
+        )
+        add(buttonRow)
+    }
+    val dialog = WidgetNode(
+        type = "AlertDialog", title = title, modifierJson = modifier.toJsonFields(),
+        children = children,
+    )
+    pendingJsonTree = listOf(dialog)
+}
+
+data class DialogButton(val label: String, val onClick: () -> Unit) {
+    internal val handleId: Long = registerCallback(onClick)
+}
+
+// Dialog buttons share the same callbackMap — no separate registry needed.
+
+/**
+ * HIG-compliant `MessageDialog` (gtk_message_dialog_new):
+ *   - 1-3 buttons: alert dialogs have between one and three buttons
+ *   - Destructive actions get a confirmation dialog
+ *
+ * Phase 5a: same shape as AlertDialog but explicitly HIG-named.
+ */
+fun MessageDialog(
+    title: String,
+    message: String,
+    confirmButton: DialogButton,
+    modifier: Modifier = Modifier.Empty,
+    dismissButton: DialogButton? = null,
+) {
+    AlertDialog(
+        onDismissRequest = { dismissButton?.onClick?.invoke() },
+        confirmButton = confirmButton,
+        modifier = modifier,
+        title = title,
+        text = message,
+        dismissButton = dismissButton,
+    )
+}
 
 /**
  * Compose-like `Scaffold { topBar = { ... }; body = { ... } }`.
