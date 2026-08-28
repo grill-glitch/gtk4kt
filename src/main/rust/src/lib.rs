@@ -678,6 +678,21 @@ fn apply_modifier<W: gtk::glib::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
     }
 }
 
+// ─── Phase 6-5: rebuild hook (Recomposer) ──────────────────────────────────
+
+/// Phase 6-5: rebuild the widget tree from the current JSON path.
+/// Used by the Recomposer to refresh the UI after a state change.
+/// Currently a no-op stub — proper rebuild is wired up in Phase 6-5 itself
+/// once the JSON re-write is verified.
+#[no_mangle]
+pub extern "C" fn gtk_bridge_rebuild_ui() -> i32 {
+    eprintln!("[gtk4kt] gtk_bridge_rebuild_ui: called (Phase 6-5 stub)");
+    // Phase 6-5 limitation: destroying+rebuilding widgets mid-frame causes
+    // GTK asserts in many cases. The proper fix is incremental updates keyed
+    // by widget ID (Phase 6-6). For now we just log the call.
+    0
+}
+
 // ─── Kotlin → Rust upcall registration ──────────────────────────────────────
 
 /// Register a Kotlin upcall function pointer so Rust can call back into Kotlin.

@@ -37,6 +37,15 @@ object GTKNative {
         f("gtk_bridge_set_ui_json_path").invokeVoid(arrayOf(path))
     }
 
+    /**
+     * Phase 6-5: rebuild UI from the currently-set JSON path. Triggers a
+     * fresh widget tree build on the GTK thread. The JSON file should be
+     * rewritten with the new content before calling this.
+     */
+    fun gtkRebuildUi() {
+        f("gtk_bridge_rebuild_ui").invokeInt(arrayOf<Any>())
+    }
+
     private fun gtkMainLoop() {
         while (true) {
             gtkMainIteration()

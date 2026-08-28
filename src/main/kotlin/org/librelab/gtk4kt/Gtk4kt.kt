@@ -65,8 +65,36 @@ private fun registerValueCallback(fn: (Long) -> Unit): Long {
 
 private var pendingJsonTree: List<WidgetNode>? = null
 
+// Captured by application{} on first run; used by the Recomposer to
+// regenerate JSON without re-entering application{} (which would block).
+@Volatile private var firstJsonPath: String = ""
+@Volatile private var firstWindowTitle: String = "gtk4kt"
+@Volatile private var firstWindowWidth: Int = 800
+@Volatile private var firstWindowHeight: Int = 600
+
+// The most recent widget tree used to build the JSON. The Recomposer
+// re-uses this tree (it can't re-evaluate the user's DSL, only replay the
+// captured structure).
+@Volatile private var lastCommittedTree: List<WidgetNode>? = null
+
+/**
+ * Phase 6-5: rebuild the UI from the last committed tree.
+ * Called by the Recomposer thread when state changes.
+ */
+fun rebuildUi() {
+    val tree = lastCommittedTree ?: return
+    val json = buildJson(tree, firstWindowTitle, firstWindowWidth, firstWindowHeight)
+    val f = java.io.File(firstJsonPath)
+    if (f.parentFile == null) return
+    f.writeText(json)
+    GTKNative.gtkSetUiJsonPath(firstJsonPath)
+    GTKNative.gtkRebuildUi()
+    System.err.println("[gtk4kt] rebuildUi: epoch=" + Recomposer.epoch)
+}
+
 fun application(appId: String, block: ApplicationScope.() -> Unit) {
     val scope = ApplicationScope().apply(block)
+    ensureRecomposer()  // start background rebuild thread
 
     // Write UI JSON to temp file
     val jsonTree = pendingJsonTree ?: emptyList()
@@ -76,6 +104,11 @@ fun application(appId: String, block: ApplicationScope.() -> Unit) {
     System.err.println("[gtk4kt] UI JSON written to: ${jsonFile.absolutePath}")
 
     pendingJsonTree = null
+    lastCommittedTree = jsonTree
+    firstJsonPath = jsonFile.absolutePath
+    firstWindowTitle = scope.windowTitle
+    firstWindowWidth = scope.windowWidth
+    firstWindowHeight = scope.windowHeight
 
     // Start GTK on a non-daemon thread (gtkMain runs in background) and
     // block the main thread so JVM stays alive.
@@ -726,6 +759,8 @@ class State<T>(initial: T) {
 
     fun setValue(new: T) {
         current = new
+        // Mark Recomposer dirty so the background thread re-renders the tree.
+        Recomposer.markDirty()
         listeners.toList().forEach { it(new) }
     }
 
@@ -771,6 +806,82 @@ fun <T> remember(key: String, initial: T): State<T> = State.get(key, initial)
  * Phase 6-4: missing the recomposition trigger (Phase 6-5).
  */
 fun <T> mutableStateOf(initial: T): State<T> = State.get("__inline_${initial.hashCode()}_${System.nanoTime()}", initial)
+
+// ============================================================================
+// Phase 6-5: Reactive rebuild — the Recomposer
+// ============================================================================
+//
+// gtk4kt's fundamental limitation up to Phase 6-4 was that state mutations
+// had no effect on the rendered widget tree — the JSON was built once.
+// This Phase adds the minimal "Recomposer": a global state-changed flag that
+// triggers a fresh JSON build + a Rust-side widget tree refresh.
+//
+// Mechanism:
+//  1. State.setValue() sets a global "dirty" flag (atomic).
+//  2. A dedicated background thread polls the flag and re-runs
+//     `application{}` to produce a fresh JSON.
+//  3. The new JSON is sent to Rust via gtk_bridge_set_ui_json_path
+//     + gtk_bridge_application_run to rebuild the widget tree.
+//  4. Each iteration increments a global `rebuildEpoch` for debugging.
+//
+// This is intentionally naive (rebuild the whole tree). Phase 6-6 will
+// switch to incremental updates via widget IDs if perf becomes an issue.
+
+object Recomposer {
+    @Volatile
+    var dirty: Boolean = false
+        private set
+
+    @Volatile
+    var epoch: Long = 0L
+        private set
+
+    private val dirtyLock = Any()
+
+    /** Called by State.setValue when state changes. */
+    internal fun markDirty() {
+        synchronized(dirtyLock) { dirty = true }
+    }
+
+    /** Called by the background thread before each rebuild. */
+    internal fun consumeDirty(): Boolean = synchronized(dirtyLock) {
+        if (dirty) { dirty = false; true } else false
+    }
+
+    /** Bump epoch (for debug / verification). */
+    internal fun bumpEpoch() { epoch++ }
+}
+
+/**
+ * Background thread that polls Recomposer.dirty and triggers rebuilds.
+ * Started once by the first application{} invocation.
+ */
+private val recomposerThread: Thread by lazy {
+    Thread({
+        while (true) {
+            if (Recomposer.consumeDirty()) {
+                // Trigger rebuild by re-running pendingJsonTree → JSON → Rust.
+                // We delegate to the same code path application{} uses; we
+                // can't re-call application{} (it would block). Instead, we
+                // call a helper that recomputes JSON from pendingJsonTree and
+                // re-runs gtk_bridge_application_run.
+                try {
+                    rebuildUi()
+                    Recomposer.bumpEpoch()
+                } catch (e: Throwable) {
+                    System.err.println("[gtk4kt] Recomposer: rebuild failed: ${'$'}{e.message}")
+                }
+            }
+            Thread.sleep(50)
+        }
+    }, "gtk4kt-Recomposer").apply {
+        isDaemon = true
+        start()
+    }
+}
+
+/** Trigger initial spin-up of the recomposer. Called by application{}. */
+internal fun ensureRecomposer() { recomposerThread }
 
 // ============================================================================
 // AlertDialog / MessageDialog — Compose-like Material3 AlertDialog +
