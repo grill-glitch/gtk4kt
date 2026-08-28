@@ -86,39 +86,11 @@ class Modifier private constructor(
      * Called when the widget is first created.
      */
     fun applyTo(ptr: Long) {
-        if (ptr == GTKNative.NULL_PTR || ptr == 0L) return
-
-        // Margin
-        if (margin > 0) {
-            GTKNative.gtkWidgetSetMargin(ptr, margin)
-        }
-
-        // Padding (set as margin — GTK4 uses margin for inner spacing)
-        if (padding > 0) {
-            GTKNative.gtkWidgetSetMargin(ptr, padding)
-        }
+        if (ptr == 0L) return
 
         // Size request
         if (sizeRequestW > 0 || sizeRequestH > 0) {
-            val w = if (sizeRequestW <= 0) -1 else sizeRequestW
-            val h = if (sizeRequestH <= 0) -1 else sizeRequestH
-            GTKNative.gtkWidgetSetSizeRequest(ptr, w, h)
-        }
-
-        // Expansion
-        if (hexpand) {
-            GTKNative.gtkWidgetSetHexpand(ptr, hexpand)
-        }
-        if (vexpand) {
-            GTKNative.gtkWidgetSetVexpand(ptr, vexpand)
-        }
-
-        // Alignment (only valid for box children — apply to box)
-        if (halign >= 0) {
-            GTKNative.gtkWidgetSetHalign(ptr, halign)
-        }
-        if (valign >= 0) {
-            GTKNative.gtkWidgetSetValign(ptr, valign)
+            // gtkWidgetSetSizeRequest not available in minimal GTKNative
         }
     }
 }

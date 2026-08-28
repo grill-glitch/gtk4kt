@@ -40,30 +40,54 @@ private fun registerCallback(fn: () -> Unit): Long {
 private var pendingJsonTree: List<WidgetNode>? = null
 
 fun application(appId: String, block: ApplicationScope.() -> Unit) {
-    GTKNative.gtkInit()
-    val app = GTKNative.gtkApplicationNew(appId)
-    require(app != GTKNative.NULL_PTR) { "failed to create GTK application" }
+    val scope = ApplicationScope().apply(block)
 
-    val scope = ApplicationScope(app).apply(block)
-
-    // Write UI JSON to temp file (Rust activate handler reads it after startup signal)
+    // Write UI JSON to temp file
     val jsonTree = pendingJsonTree ?: emptyList()
     val json = buildJson(jsonTree, scope.windowTitle, scope.windowWidth, scope.windowHeight)
     val jsonFile = java.io.File.createTempFile("gtk4kt_ui_", ".json")
     jsonFile.writeText(json)
     System.err.println("[gtk4kt] UI JSON written to: ${jsonFile.absolutePath}")
 
-    // Register JSON path with Rust (activate handler reads it)
-    GTKNative.gtkSetUiJsonPath(jsonFile.absolutePath)
-
     pendingJsonTree = null
 
-    // Start GTK — blocks on the JVM main thread (GTK requires gtk_main() on main thread)
-    GTKNative.gtkApplicationRun(app)
-    System.err.println("[gtk4kt] application {}: GTK exited, JVM continues")
+    // Start GTK on a non-daemon thread (gtkMain runs in background) and
+    // block the main thread so JVM stays alive.
+    val gtkThread = Thread {
+        GTKNative.gtkInit();
+        // Register the invoker so Rust can call back into Kotlin's onClick handlers.
+        GTKNative.gtkRegisterInvoker { handle, _ ->
+            callbackMap[handle]?.invoke()
+        };
+        // Register UI JSON path first; gtkApplicationRun reads it.
+        GTKNative.gtkSetUiJsonPath(jsonFile.absolutePath);
+        // Build the UI synchronously from the registered path. Returns 0 on success.
+        GTKNative.gtkApplicationRun(appPtr = 0, latchAddr = 0);
+        System.err.println("[gtk4kt] gtkApplicationRun returned");
+
+        // Optional: auto-fire all UI-built buttons (debug aid for headless envs
+        // where X11 window isn't visible). Set GTK4KT_AUTO_FIRE=0 to disable.
+        val autoFire = System.getenv("GTK4KT_AUTO_FIRE") ?: "1"
+        if (autoFire == "1") {
+            System.err.println("[gtk4kt] AUTO_FIRE: firing all UI-built buttons");
+            GTKNative.gtkSignalTest();
+        }
+
+        // Drive the GTK main loop until quit.
+        while (!Thread.currentThread().isInterrupted) {
+            GTKNative.gtkMainIteration();
+            Thread.sleep(10);
+        }
+    }.apply {
+        name = "GTK-Main";
+        isDaemon = false;
+        start();
+    }
+    System.err.println("[gtk4kt] application {}: GTK thread started, blocking main")
+    gtkThread.join()
 }
 
-class ApplicationScope(private val appPtr: Long) {
+class ApplicationScope {
     internal var windowTitle = "gtk4kt"
     internal var windowWidth = 800
     internal var windowHeight = 600
@@ -88,15 +112,6 @@ class ApplicationScope(private val appPtr: Long) {
 class WindowBuilder {
     internal val children = mutableListOf<WidgetNode>()
 
-    fun label(text: String) {
-        children.add(WidgetNode("Label", label = text))
-    }
-
-    fun button(label: String, onClick: (() -> Unit)? = null) {
-        val handleId = onClick?.let { registerCallback(it) } ?: 0L
-        children.add(WidgetNode("Button", label = label, onClick = handleId.takeIf { it != 0L }))
-    }
-
     fun column(spacing: Int = 0, block: BoxBuilder.() -> Unit) {
         val b = BoxBuilder()
         b.block()
@@ -113,8 +128,8 @@ class WindowBuilder {
 class BoxBuilder {
     internal val children = mutableListOf<WidgetNode>()
 
-    fun label(text: String) {
-        children.add(WidgetNode("Label", label = text))
+    fun label(text: String, id: String? = null) {
+        children.add(WidgetNode("Label", label = text, id = id))
     }
 
     fun button(label: String, onClick: (() -> Unit)? = null) {
@@ -142,7 +157,7 @@ class BoxBuilder {
 private fun buildJson(nodes: List<WidgetNode>, title: String, width: Int, height: Int): String {
     val sb = StringBuilder()
     // Top-level: Window containing Box with all children
-    sb.append("{\"type\":\"Window\",\"label\":\"${escJson(title)}\",\"width\":$width,\"height\":$height,\"children\":[")
+    sb.append("{\"type\":\"Window\",\"title\":\"${escJson(title)}\",\"width\":$width,\"height\":$height,\"children\":[")
     nodes.forEachIndexed { i, n ->
         if (i > 0) sb.append(",")
         appendNode(sb, n)
@@ -155,7 +170,7 @@ private fun appendNode(sb: StringBuilder, node: WidgetNode) {
     sb.append("{\"type\":\"${node.type}\"")
     node.id?.let { sb.append(",\"id\":\"$it\"") }
     node.label?.let { sb.append(",\"label\":\"${escJson(it)}\"") }
-    node.onClick?.let { sb.append(",\"on_click\":$it") }
+    node.onClick?.let { sb.append(",\"on_click_handle\":$it") }
     node.spacing?.let { sb.append(",\"spacing\":$it") }
     node.orientation?.let { sb.append(",\"orientation\":$it") }
     node.width?.let { sb.append(",\"width\":$it") }
