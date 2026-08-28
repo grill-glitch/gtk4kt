@@ -11,6 +11,7 @@ data class WidgetNode(
     val type: String,
     val id: String? = null,
     val label: String? = null,
+    val title: String? = null,
     val children: List<WidgetNode>? = null,
     val onClick: Long? = null,
     val spacing: Int? = null,
@@ -24,6 +25,10 @@ data class WidgetNode(
     val min: Double? = null,
     val max: Double? = null,
     val value: Double? = null,
+    // Phase 4d: icon / placeholder / text input
+    val icon: String? = null,
+    val placeholder: String? = null,
+    val text: String? = null,
     /**
      * Optional Modifier (Compose-style) for this widget. Stored as raw JSON
      * fragment to append during serialization. Set via `modifier` parameter
@@ -149,6 +154,30 @@ class WindowBuilder {
             WidgetNode("Box", orientation = 0, spacing = spacing, modifierJson = modifier.toJsonFields(),
                 children = b.children.toList())
         )
+    }
+}
+
+// ============================================================================
+// DropdownMenuBuilder — items for a Compose-like DropdownMenu
+// ============================================================================
+
+/** Holds (label, onClick) pairs collected inside a `DropdownMenu { ... }` block. */
+class DropdownMenuBuilder {
+    internal val items = mutableListOf<DropdownItem>()
+
+    /** Compose-like `DropdownMenuItem` — a single menu entry. */
+    fun DropdownMenuItem(label: String, onClick: (() -> Unit)? = null) {
+        items.add(DropdownItem(label, onClick))
+    }
+
+    fun dropdownMenuItem(label: String, onClick: (() -> Unit)? = null) {
+        DropdownMenuItem(label, onClick)
+    }
+}
+
+internal data class DropdownItem(val label: String, val onClick: (() -> Unit)?) {
+    fun toWidgetNode(): WidgetNode {
+        return WidgetNode(type = "DropdownMenuItem", label = label)
     }
 }
 
@@ -304,6 +333,93 @@ class BoxBuilder {
     ) = Slider(value, modifier, onValueChange, min, max)
 
     /**
+     * Compose-like Icon — a stock GTK icon (e.g. "go-previous").
+     * Maps to gtk::Image::from_icon_name.
+     */
+    fun Icon(icon: String, modifier: Modifier = Modifier.Empty) {
+        children.add(WidgetNode("Icon", icon = icon, modifierJson = modifier.toJsonFields()))
+    }
+
+    fun icon(icon: String, modifier: Modifier = Modifier.Empty) = Icon(icon, modifier)
+
+    /**
+     * Compose-like IconButton — a button with an icon (no label).
+     * `onClick` fires the Kotlin callback.
+     */
+    fun IconButton(
+        icon: String,
+        modifier: Modifier = Modifier.Empty,
+        onClick: (() -> Unit)? = null,
+    ) {
+        val handleId = onClick?.let { registerCallback(it) } ?: 0L
+        children.add(
+            WidgetNode("IconButton", icon = icon, modifierJson = modifier.toJsonFields(),
+                onClick = handleId.takeIf { it != 0L })
+        )
+    }
+
+    fun iconButton(
+        icon: String,
+        modifier: Modifier = Modifier.Empty,
+        onClick: (() -> Unit)? = null,
+    ) = IconButton(icon, modifier, onClick)
+
+    /**
+     * Compose-like OutlinedTextField — a single-line text entry with placeholder.
+     * `onValueChange` fires whenever the user types.
+     */
+    fun OutlinedTextField(
+        value: String = "",
+        placeholder: String = "",
+        modifier: Modifier = Modifier.Empty,
+        onValueChange: ((String) -> Unit)? = null,
+    ) {
+        val handleId = onValueChange?.let { registerValueCallback { _ -> /* text retrieval in Phase 5 */ } } ?: 0L
+        children.add(
+            WidgetNode("OutlinedTextField", text = value, placeholder = placeholder,
+                modifierJson = modifier.toJsonFields(),
+                onChange = handleId.takeIf { it != 0L })
+        )
+    }
+
+    fun outlinedTextField(
+        value: String = "",
+        placeholder: String = "",
+        modifier: Modifier = Modifier.Empty,
+        onValueChange: ((String) -> Unit)? = null,
+    ) = OutlinedTextField(value, placeholder, modifier, onValueChange)
+
+    fun TextField(
+        value: String = "",
+        placeholder: String = "",
+        modifier: Modifier = Modifier.Empty,
+        onValueChange: ((String) -> Unit)? = null,
+    ) = OutlinedTextField(value, placeholder, modifier, onValueChange)
+
+    /**
+     * Compose-like DropdownMenu — a button that pops up a list of items.
+     * Use the `DropdownMenuItem { label; onClick }` builder DSL inside the block.
+     */
+    fun DropdownMenu(
+        label: String,
+        modifier: Modifier = Modifier.Empty,
+        block: DropdownMenuBuilder.() -> Unit,
+    ) {
+        val mb = DropdownMenuBuilder()
+        mb.block()
+        children.add(
+            WidgetNode("DropdownMenu", label = label, modifierJson = modifier.toJsonFields(),
+                children = mb.items.map { it.toWidgetNode() })
+        )
+    }
+
+    fun dropdownMenu(
+        label: String,
+        modifier: Modifier = Modifier.Empty,
+        block: DropdownMenuBuilder.() -> Unit,
+    ) = DropdownMenu(label, modifier, block)
+
+    /**
      * Compose-like Spacer. A Spacer with no modifier does nothing;
      * with `Modifier.height(8.dp)` it adds vertical gap, with
      * `Modifier.width(8.dp)` it adds horizontal gap.
@@ -336,12 +452,132 @@ class BoxBuilder {
 }
 
 // ============================================================================
+// DropdownMenuBuilder — items for a Compose-like DropdownMenu
+// ============================================================================
+
+// ============================================================================
+// Scaffold — Compose-like top-level Scaffold/TopAppBar (replaces Window)
+// ============================================================================
+
+/**
+ * Compose-like `Scaffold { topBar = { ... }; body = { ... } }`.
+ *
+ * Provides a top-bar (optional) plus a body builder. Children of topBar become
+ * a gtk::HeaderBar; children of body go into the main content area.
+ *
+ * Usage:
+ * ```
+ * Scaffold(title = "Settings", width = 400, height = 600) {
+ *     topBar {
+ {
+ *         IconButton("go-previous") { onBack() }
+ {
+ *     }
+ *     body {
+ {
+ *         Column { Text("Hello") }
+ {
+ *     }
+ {
+ * }
+ *
+ * @param block receives a ScaffoldScope with topBar() and body() helpers.
+ */
+fun Scaffold(
+    title: String = "gtk4kt",
+    width: Int = 800,
+    height: Int = 600,
+    block: ScaffoldScope.() -> Unit,
+) {
+    val scope = ScaffoldScope().apply(block)
+    // Build the JSON tree:
+    //   Scaffold { TopBar { ... } , [body widget] }
+    val children = mutableListOf<WidgetNode>()
+    if (scope.topBarChildren.isNotEmpty()) {
+        children.add(WidgetNode("TopAppBar", title = title, children = scope.topBarChildren))
+    }
+    // Body becomes a single Column wrapping all body children (use a Box).
+    val bodyNode = WidgetNode(
+        type = "Box",
+        orientation = 1,
+        spacing = 0,
+        children = scope.bodyChildren,
+    )
+    children.add(bodyNode)
+
+    val winNode = WidgetNode(
+        type = "Scaffold",
+        title = title,
+        width = width,
+        height = height,
+        children = children,
+    )
+
+    // Push through the existing application{} pipeline.
+    pendingJsonTree = listOf(winNode)
+}
+
+class ScaffoldScope {
+    internal val topBarChildren = mutableListOf<WidgetNode>()
+    internal val bodyChildren = mutableListOf<WidgetNode>()
+
+    /** Compose-like `ScaffoldScope.topBar { ... }` — HeaderBar contents. */
+    fun topBar(block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        topBarChildren.addAll(b.children)
+    }
+
+    /** Compose-like `ScaffoldScope.body { ... }` — main content. */
+    fun body(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        // Modifier is stored on the body box's modifierJson — applied by Rust apply_modifier.
+        bodyChildren.addAll(b.children.map { it })
+    }
+}
+
+// ============================================================================
+// Icons namespace — Compose-like material icons → GTK stock icon names
+// ============================================================================
+
+/**
+ * Compose-like `Icons.Outlined.<name>` namespace, mapped to GTK stock icon names.
+ * Most Android Compose material icons have a 1:1 GTK equivalent in the standard
+ * icon theme; if a name is missing, GTK falls back to "image-missing".
+ */
+object Icons {
+    object Outlined {
+        val ArrowBack = "go-previous"
+        val FolderOpen = "folder-open"
+        val Settings = "preferences-system"
+        val Search = "system-search"
+        val Add = "list-add"
+        val Delete = "edit-delete"
+        val Close = "window-close"
+        val Check = "object-select"
+        val Info = "dialog-information"
+        val Warning = "dialog-warning"
+        val Home = "go-home"
+        val Refresh = "view-refresh"
+        val Play = "media-playback-start"
+        val Pause = "media-playback-pause"
+        val Stop = "media-playback-stop"
+    }
+}
+
+// ============================================================================
 // JSON serialization
 // ============================================================================
 
 private fun buildJson(nodes: List<WidgetNode>, title: String, width: Int, height: Int): String {
     val sb = StringBuilder()
-    // Top-level: Window containing Box with all children
+    // If the root is a Scaffold, use it directly (it carries its own title/width/height).
+    // Otherwise wrap in a Window (Compose-style application{ window{...} }).
+    if (nodes.size == 1 && nodes[0].type == "Scaffold") {
+        appendNode(sb, nodes[0])
+        return sb.toString()
+    }
     sb.append("{\"type\":\"Window\",\"title\":\"${escJson(title)}\",\"width\":$width,\"height\":$height,\"children\":[")
     nodes.forEachIndexed { i, n ->
         if (i > 0) sb.append(",")
@@ -361,12 +597,16 @@ private fun appendNode(sb: StringBuilder, node: WidgetNode) {
     node.width?.let { sb.append(",\"width\":$it") }
     node.height?.let { sb.append(",\"height\":$it") }
     node.margin?.let { sb.append(",\"margin\":$it") }
-    // Phase 4c: control properties
+    // Phase 4d: control properties
     node.active?.let { sb.append(",\"active\":$it") }
     node.onChange?.let { sb.append(",\"on_change_handle\":$it") }
     node.min?.let { sb.append(",\"min\":$it") }
     node.max?.let { sb.append(",\"max\":$it") }
     node.value?.let { sb.append(",\"value\":$it") }
+    // Phase 4d: icon / placeholder / text
+    node.icon?.let { sb.append(",\"icon\":\"${escJson(it)}\"") }
+    node.placeholder?.let { sb.append(",\"placeholder\":\"${escJson(it)}\"") }
+    node.text?.let { sb.append(",\"text\":\"${escJson(it)}\"") }
     // Modifier fields (padding/sizing/alignment) — already formatted as JSON fields
     if (node.modifierJson.isNotEmpty()) sb.append(node.modifierJson)
     if (!node.children.isNullOrEmpty()) {

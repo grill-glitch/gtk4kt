@@ -67,6 +67,10 @@ pub struct WidgetNode {
     #[serde(default)] pub min: Option<f64>,
     #[serde(default)] pub max: Option<f64>,
     #[serde(default)] pub value: Option<f64>,
+
+    // ─── Phase 4d: icon / placeholder ─────────────────────────────────────
+    #[serde(default)] pub icon: Option<String>,
+    #[serde(default)] pub placeholder: Option<String>,
 }
 
 // ─── Widget builder ─────────────────────────────────────────────────────────
@@ -275,6 +279,155 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             apply_modifier(&scale, node);
             scale.show();
             Some(scale.upcast())
+        }
+
+        // Phase 4d: Icon — a gtk::Image from a stock icon name (e.g. "go-previous").
+        "Icon" => {
+            let icon_name = node.icon.as_deref().unwrap_or("image-missing");
+            let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::Button);
+            apply_modifier(&img, node);
+            img.show();
+            Some(img.upcast())
+        }
+
+        // Phase 4d: IconButton — a gtk::Button with an Icon as its image.
+        "IconButton" => {
+            let icon_name = node.icon.as_deref().unwrap_or("image-missing");
+            let btn = gtk::Button::new();
+            let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::Button);
+            btn.set_image(Some(&img));
+            if let Some(handle) = node.on_click_handle {
+                let handle_copy = handle;
+                btn.connect_clicked(move |_| {
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        f(handle_copy, std::ptr::null());
+                    }
+                });
+            }
+            apply_modifier(&btn, node);
+            btn.show();
+            Some(btn.upcast())
+        }
+
+        // Phase 4d: Scaffold — a Window wrapper with optional TopAppBar.
+        // Children include a TopBar (packed at top) and body widgets (fill).
+        "Scaffold" => {
+            let win = gtk::Window::new(gtk::WindowType::Toplevel);
+            if let Some(ref t) = node.title {
+                win.set_title(t);
+            }
+            if let (Some(w), Some(h)) = (node.width, node.height) {
+                win.set_default_size(w, h);
+            }
+            win.set_border_width(0);
+            let win_w = win.clone();
+            win.connect_delete_event(move |_, _| {
+                gtk::main_quit();
+                gtk::glib::Propagation::Proceed
+            });
+            // Wrap body in a vertical Box so we can prepend a TopBar.
+            let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            for child in &node.children {
+                if child.widget_type == "TopBar" || child.widget_type == "TopAppBar" {
+                    if let Some(c) = build_widget(child) {
+                        vbox.pack_start(&c, false, false, 0);
+                    }
+                } else if let Some(c) = build_widget(child) {
+                    vbox.pack_start(&c, true, true, 0);
+                }
+            }
+            vbox.show_all();
+            win_w.add(&vbox);
+            win.show_all();
+            Some(win.upcast())
+        }
+
+        // Phase 4d: TopAppBar — gtk::HeaderBar with title and optional nav icon.
+        "TopBar" | "TopAppBar" => {
+            let hb = gtk::HeaderBar::new();
+            hb.set_show_close_button(true);
+            if let Some(ref t) = node.title {
+                hb.set_title(Some(t));
+            }
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    if child.widget_type == "IconButton" {
+                        hb.pack_start(&c);
+                    } else {
+                        hb.pack_end(&c);
+                    }
+                }
+            }
+            hb.show();
+            Some(hb.upcast())
+        }
+
+        // Phase 4d: OutlinedTextField — a gtk::Entry with placeholder text.
+        "OutlinedTextField" | "TextField" => {
+            let entry = gtk::Entry::new();
+            if let Some(ref text) = node.text {
+                entry.set_text(text);
+            }
+            if let Some(ref ph) = node.placeholder {
+                entry.set_placeholder_text(Some(ph));
+            }
+            if let Some(handle) = node.on_change_handle {
+                let handle_copy = handle;
+                entry.connect_changed(move |_e| {
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        f(handle_copy, std::ptr::null());
+                    }
+                });
+            }
+            apply_modifier(&entry, node);
+            entry.show();
+            Some(entry.upcast())
+        }
+
+        // Phase 4d: DropdownMenu — a gtk::MenuButton (split-button dropdown).
+        "DropdownMenu" => {
+            let mb = gtk::MenuButton::new();
+            if let Some(ref label) = node.label {
+                mb.set_label(label);
+            }
+            let menu = gtk::Menu::new();
+            for child in &node.children {
+                if child.widget_type == "DropdownMenuItem" {
+                    let label_str = child.label.as_deref().unwrap_or("Item");
+                    let mi = gtk::MenuItem::with_label(label_str);
+                    if let Some(handle) = child.on_click_handle {
+                        let handle_copy = handle;
+                        mi.connect_activate(move |_| {
+                            if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                                type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                                let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                                f(handle_copy, std::ptr::null());
+                            }
+                        });
+                    }
+                    menu.add(&mi);
+                    mi.show();
+                }
+            }
+            // MenuButton has a popup Menu, not a submenu. Use GtkMenuButtonExt::set_popup.
+            // MenuButton has a popup Menu, not a submenu. Trait is in gtk::prelude.
+            use gtk::prelude::MenuButtonExt;
+            mb.set_popup(Some(&menu));
+            apply_modifier(&mb, node);
+            mb.show();
+            Some(mb.upcast())
+        }
+
+        // Phase 4d: DropdownMenuItem — handled inside DropdownMenu; standalone = just a button.
+        "DropdownMenuItem" => {
+            let label_str = node.label.as_deref().unwrap_or("Item");
+            let btn = gtk::Button::with_label(label_str);
+            btn.show();
+            Some(btn.upcast())
         }
 
         _ => {

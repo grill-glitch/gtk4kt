@@ -118,7 +118,20 @@ class Modifier private constructor(
 
     // ─── Instance chain methods (Compose-like: Modifier.Empty.padding(16).fillMaxWidth()) ──
 
+    /** Compose-like `padding(all: Int)`. */
     fun padding(all: Int): Modifier = copy(paddingStart = all, paddingEnd = all, paddingTop = all, paddingBottom = all)
+
+    /** Compose-like `padding(horizontal: Int, vertical: Int)`. */
+    fun padding(horizontal: Int, vertical: Int): Modifier = copy(
+        paddingStart = horizontal, paddingEnd = horizontal,
+        paddingTop = vertical, paddingBottom = vertical,
+    )
+
+    /** Compose-like `padding(start, top, end, bottom)`. */
+    fun padding(start: Int, top: Int, end: Int, bottom: Int): Modifier = copy(
+        paddingStart = start, paddingEnd = end,
+        paddingTop = top, paddingBottom = bottom,
+    )
 
     fun paddingHorizontal(horizontal: Int): Modifier = copy(paddingStart = horizontal, paddingEnd = horizontal)
 
