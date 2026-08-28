@@ -18,25 +18,57 @@ import org.librelab.gtk4kt.runtime.AlignmentHorizontal
 fun main() {
     application("org.gtk4kt.ika.library") {
         window(title = "ika (gtk4kt port)", width = 480, height = 720) {
-            LibraryScreen()
+            // Phase 6-1/6-2: switch between SetupScreen (no game root picked)
+            // and EmptyState (root picked, no games yet). Real LibraryScreen
+            // uses a ViewModel.state to decide which; we just hardcode here.
+            LibraryScreen(
+                state = LibraryState.EmptySetup,
+                onPickGameRoot = { System.err.println("[Library] pick game root") },
+                onAddGame = { System.err.println("[Library] add game") },
+                onOpenSettings = { System.err.println("[Library] settings") },
+            )
         }
     }
 }
 
-private fun WindowBuilder.LibraryScreen() {
-    // LibraryScreen top-level: Scaffold { TopAppBar; body shows SetupScreen
-    // (empty state, no games yet) }.
+/** Coarse states ika's ViewModel exposes to LibraryScreen. */
+enum class LibraryState { EmptySetup, EmptyAfterRoot, HasGames }
+
+/**
+ * LibraryScreen top-level: Scaffold with TopAppBar + body depending on state.
+ *
+ * Compose source (overview):
+ * ```
+ * @Composable
+ * fun LibraryScreen(viewModel, modifier = Modifier) {
+ *     val settings by viewModel.settings.collectAsState()
+ *     when {
+ *         settings.gameRoot.isEmpty() -> SetupScreen(...)
+ *         viewModel.games.isEmpty()    -> EmptyState(...)
+ *         else                          -> ...recents grid...
+ *     }
+ * }
+ * ```
+ */
+private fun WindowBuilder.LibraryScreen(
+    state: LibraryState,
+    onPickGameRoot: () -> Unit,
+    onAddGame: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     Scaffold(title = "ika (gtk4kt port)", width = 480, height = 720) {
         topBar {
             IconButton(Icons.Outlined.Settings) {
                 System.err.println("[Library] settings clicked")
+                onOpenSettings()
             }
         }
         body {
-            SetupScreen(
-                onPick = { System.err.println("[Library] pick game root clicked") },
-                modifier = Modifier.fillMaxSize()
-            )
+            when (state) {
+                LibraryState.EmptySetup -> SetupScreen(onPickGameRoot)
+                LibraryState.EmptyAfterRoot -> EmptyState(onAddGame)
+                LibraryState.HasGames -> EmptyState(onAddGame) // Phase 6-7 will replace
+            }
         }
     }
 }
@@ -62,49 +94,61 @@ private fun WindowBuilder.LibraryScreen() {
  *     Button(onClick = onPick) { Icon(...); Spacer(width=8.dp); Text(setup_pick) }
  * }
  * ```
- *
- * Known gaps in gtk4kt (will be addressed during porting):
- *   - No `dp` unit conversion (using pixel values)
- *   - No `tint` on Icon
- *   - No `MaterialTheme.typography` styles
- *   - No `Text(textAlign = ...)` — using Modifier.align() workaround
  */
-private fun WindowBuilder.SetupScreen(
-    onPick: () -> Unit,
-    modifier: Modifier = Modifier.Empty,
-) {
-    // Compose's Column + horizontalAlignment/verticalArrangement don't have
-    // direct 1:1 mappings in gtk4kt yet. We emulate by:
-    //  - fillMaxSize on the Column (mod)
-    //  - weight(1f) on children to make them equal-height
-    //  - Spacers with weight(1f) for the Arrangement.Center effect
-    column(modifier = modifier.fillMaxSize()) {
-        // Top spacer pushes content to center (Arrangement.Center approximation)
+private fun WindowBuilder.SetupScreen(onPick: () -> Unit) {
+    column(modifier = Modifier.fillMaxSize().padding(32)) {
         Spacer(Modifier.weight(1f))
-
-        // Icons.Outlined.FolderOpen at 72px
         Icon(Icons.Outlined.FolderOpen, modifier = Modifier.size(72, 72))
         Spacer(Modifier.height(16))
-
-        // Centered Text (uses Modifier.align on cross-axis, not TextAlign.Center
-        // yet — that's a Phase 6 gap)
         Text(
             "Set up your game library",
-            modifier = Modifier.Empty.fillMaxWidth().align(AlignmentHorizontal.CenterHorizontally),
+            modifier = Modifier.fillMaxWidth().align(AlignmentHorizontal.CenterHorizontally),
         )
         Spacer(Modifier.height(8))
         Text(
             "Pick a folder where your games live and I'll scan it for engines.",
-            modifier = Modifier.Empty.fillMaxWidth().align(AlignmentHorizontal.CenterHorizontally),
+            modifier = Modifier.fillMaxWidth().align(AlignmentHorizontal.CenterHorizontally),
         )
         Spacer(Modifier.height(24))
-
-        // Button (no Icon prefix inside for simplicity — full Button with
-        // Icon-leading layout will be added when we port GameCard which
-        // exercises that pattern)
         Button("Pick game folder") { onPick() }
+        Spacer(Modifier.weight(1f))
+    }
+}
 
-        // Bottom spacer pushes content to center
+/**
+ * EmptyState — "no games found" screen.
+ *
+ * Compose source:
+ * ```
+ * Column(
+ *     modifier = modifier.padding(32.dp).fillMaxSize(),
+ *     horizontalAlignment = Alignment.CenterHorizontally,
+ *     verticalArrangement = Arrangement.Center,
+ * ) {
+ *     Icon(Icons.Outlined.Storage, ..., modifier = Modifier.size(72.dp), tint = ...)
+ *     Spacer(Modifier.height(16.dp))
+ *     Text(library_empty, ..., textAlign = TextAlign.Center)
+ *     Spacer(Modifier.height(24.dp))
+ *     Button(onClick = onAdd) { Icon(Icons.Outlined.Add); Spacer; Text(library_add) }
+ * }
+ * ```
+ *
+ * Differs from SetupScreen in:
+ *  - Icon: Icons.Outlined.Storage (not FolderOpen)
+ *  - Single text block (no body description)
+ *  - Button label "Add game" (not "Pick game folder")
+ */
+private fun WindowBuilder.EmptyState(onAdd: () -> Unit) {
+    column(modifier = Modifier.fillMaxSize().padding(32)) {
+        Spacer(Modifier.weight(1f))
+        Icon(Icons.Outlined.Storage, modifier = Modifier.size(72, 72))
+        Spacer(Modifier.height(16))
+        Text(
+            "No games found",
+            modifier = Modifier.fillMaxWidth().align(AlignmentHorizontal.CenterHorizontally),
+        )
+        Spacer(Modifier.height(24))
+        Button("Add game") { onAdd() }
         Spacer(Modifier.weight(1f))
     }
 }

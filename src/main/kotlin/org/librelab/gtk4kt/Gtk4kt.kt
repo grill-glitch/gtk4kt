@@ -845,6 +845,12 @@ object Icons {
         val Play = "media-playback-start"
         val Pause = "media-playback-pause"
         val Stop = "media-playback-stop"
+        val Storage = "drive-harddisk"
+        val Games = "applications-games"
+        val Cloud = "weather-clouds"
+        val MoreVert = "view-more"
+        val PlayArrow = "media-playback-start"
+        val RestartAlt = "view-refresh"
     }
 }
 
