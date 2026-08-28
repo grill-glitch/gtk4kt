@@ -28,6 +28,11 @@ data class WidgetNode(
     // Phase 4d: icon / placeholder / text input
     val icon: String? = null,
     val placeholder: String? = null,
+    val tag: String? = null,
+    val description: String? = null,
+    val collapsed: Boolean? = null,
+    val maxSidebarWidth: Double? = null,
+    val columns: Int? = null,
     val text: String? = null,
     /**
      * Optional Modifier (Compose-style) for this widget. Stored as raw JSON
@@ -435,6 +440,7 @@ class BoxBuilder {
 
     fun circularProgressIndicator(modifier: Modifier = Modifier.Empty) = CircularProgressIndicator(modifier)
 
+    @Deprecated(message = "ElevatedCard is Material 3 mobile design. Use ListBox rows in PreferencesGroup or simple Card. Phase 7 desktop-first.")
     /**
      * Compose-like `ElevatedCard` — Card with stronger shadow.
      * For Phase 5a, identical to Card; future phases will add elevation classes.
@@ -491,11 +497,190 @@ class BoxBuilder {
         onClick: (() -> Unit)? = null,
     ) = TextButton(label, modifier, onClick)
 
+    @Deprecated(message = "FloatingActionButton is Material 3 mobile design. Use HeaderBar primary action instead (Phase 7).")
     /**
      * Compose-like `FloatingActionButton` — circular button typically for
      * primary actions. Phase 5a: rendered as a styled Button (icon or label).
      */
-    fun FloatingActionButton(
+    // ─── Phase 7 desktop-first widgets ─────────────────────────────────────
+
+    /** Compose-like NavigationSplitView. child[0] = sidebar slot, child[1] = content slot. */
+    fun NavigationSplitView(
+        modifier: Modifier = Modifier.Empty,
+        maxSidebarWidth: Double = 240.0,
+        collapsed: Boolean = false,
+        sidebar: BoxBuilder.() -> Unit,
+        content: BoxBuilder.() -> Unit,
+    ) {
+        val sb = BoxBuilder(); sb.sidebar()
+        val cb = BoxBuilder(); cb.content()
+        children.add(
+            WidgetNode(
+                type = "NavigationSplitView",
+                modifierJson = modifier.toJsonFields(),
+                maxSidebarWidth = maxSidebarWidth,
+                collapsed = collapsed,
+                children = listOf(
+                    WidgetNode(type = "Sidebar", children = sb.children.toList()),
+                    // Wrap content in a Stack so it can switch pages.
+                    WidgetNode(type = "Box", orientation = 1, spacing = 0, children = cb.children.toList()),
+                ),
+            ),
+        )
+    }
+
+    /** Sidebar (within NavigationSplitView sidebar slot). */
+    fun Sidebar(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder(); b.block()
+        children.add(WidgetNode(type = "Sidebar", modifierJson = modifier.toJsonFields(), children = b.children.toList()))
+    }
+
+    /** NavigationPage — sidebar list item. */
+    fun NavigationPage(
+        title: String,
+        icon: String,
+        tag: String,
+        onClick: () -> Unit,
+    ) {
+        val handleId = registerCallback(onClick)
+        children.add(
+            WidgetNode(
+                type = "NavigationPage",
+                title = title,
+                icon = icon,
+                tag = tag,
+                onClick = handleId.takeIf { it != 0L },
+            ),
+        )
+    }
+
+    /** PreferencesPage — flat group layout for settings. */
+    fun PreferencesPage(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder(); b.block()
+        children.add(WidgetNode(type = "PreferencesPage", modifierJson = modifier.toJsonFields(), children = b.children.toList()))
+    }
+
+    /** PreferencesGroup — labeled section within a PreferencesPage. */
+    fun PreferencesGroup(
+        title: String? = null,
+        description: String? = null,
+        block: BoxBuilder.() -> Unit,
+    ) {
+        val b = BoxBuilder(); b.block()
+        children.add(
+            WidgetNode(
+                type = "PreferencesGroup",
+                title = title,
+                description = description,
+                children = b.children.toList(),
+            ),
+        )
+    }
+
+    /** ActionRow — title + subtitle + suffix control. */
+    fun ActionRow(
+        title: String? = null,
+        description: String? = null,
+        icon: String? = null,
+        block: BoxBuilder.() -> Unit,
+    ) {
+        val b = BoxBuilder(); b.block()
+        children.add(
+            WidgetNode(
+                type = "ActionRow",
+                title = title,
+                description = description,
+                icon = icon,
+                children = b.children.toList(),
+            ),
+        )
+    }
+
+    /** ListBox — flat list container. */
+    fun ListBox(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder(); b.block()
+        children.add(WidgetNode(type = "ListBox", modifierJson = modifier.toJsonFields(), children = b.children.toList()))
+    }
+
+    /** ListBoxRow — single row in a ListBox. Optional onClick makes it activatable. */
+    fun ListBoxRow(
+        onClick: () -> Unit = {},
+        modifier: Modifier = Modifier.Empty,
+        block: BoxBuilder.() -> Unit,
+    ) {
+        val handleId = registerCallback(onClick)
+        val b = BoxBuilder(); b.block()
+        children.add(
+            WidgetNode(
+                type = "ListBoxRow",
+                modifierJson = modifier.toJsonFields(),
+                onClick = handleId.takeIf { it != 0L },
+                children = b.children.toList(),
+            ),
+        )
+    }
+
+    /** GridView — multi-column flow layout (uses GtkFlowBox internally). */
+    fun GridView(columns: Int = 2, modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder(); b.block()
+        children.add(
+            WidgetNode(
+                type = "GridView",
+                columns = columns,
+                modifierJson = modifier.toJsonFields(),
+                children = b.children.toList(),
+            ),
+        )
+    }
+
+    /** StatusPage — empty-state widget (icon + title + description + optional action). */
+    fun StatusPage(
+        icon: String? = null,
+        title: String? = null,
+        description: String? = null,
+        modifier: Modifier = Modifier.Empty,
+        action: (BoxBuilder.() -> Unit)? = null,
+    ) {
+        val b = BoxBuilder()
+        if (action != null) b.action()
+        children.add(
+            WidgetNode(
+                type = "StatusPage",
+                icon = icon,
+                title = title,
+                description = description,
+                modifierJson = modifier.toJsonFields(),
+                children = b.children.toList(),
+            ),
+        )
+    }
+
+    /** Toast — non-blocking notification (emulated via GtkInfoBar in gtk3). */
+    fun Toast(message: String, timeoutMs: Int = 3000, modifier: Modifier = Modifier.Empty) {
+        children.add(
+            WidgetNode(
+                type = "Toast",
+                title = message,
+                value = timeoutMs.toDouble(),
+                modifierJson = modifier.toJsonFields(),
+            ),
+        )
+    }
+
+    /** HeaderBar — desktop top toolbar with title + actions. */
+    fun HeaderBar(title: String, modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder(); b.block()
+        children.add(
+            WidgetNode(
+                type = "HeaderBar",
+                title = title,
+                modifierJson = modifier.toJsonFields(),
+                children = b.children.toList(),
+            ),
+        )
+    }
+
+        fun FloatingActionButton(
         content: String,
         modifier: Modifier = Modifier.Empty,
         onClick: (() -> Unit)? = null,
@@ -1066,6 +1251,7 @@ object Icons {
         val Play = "media-playback-start"
         val Pause = "media-playback-pause"
         val Stop = "media-playback-stop"
+        val History = "document-open-recent"
         val Storage = "drive-harddisk"
         val Games = "applications-games"
         val Cloud = "weather-clouds"

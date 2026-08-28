@@ -79,6 +79,18 @@ pub struct WidgetNode {
     #[serde(default)] pub hWeight: Option<f32>,
     #[serde(default)] pub vWeight: Option<f32>,
     #[serde(default)] pub alignmentCrossAxis: Option<i32>,
+    // ─── Phase 7 desktop-first fields ─────────────────────────────────────
+    #[serde(default)] pub tag: Option<String>,
+    #[serde(default)] pub description: Option<String>,
+    #[serde(default)] pub collapsed: Option<bool>,
+    #[serde(default)] pub maxSidebarWidth: Option<f64>,
+    #[serde(default)] pub columns: Option<i32>,
+}
+
+/// Downcast helper — libadwaita APIs take `&impl IsA<gtk::Widget>`; this
+/// converts a generic gtk::Widget reference. No-op for already-concrete types.
+fn downcast_to_widget(w: &gtk::Widget) -> gtk::Widget {
+    w.clone()
 }
 
 // ─── Widget builder ─────────────────────────────────────────────────────────
@@ -579,6 +591,337 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             btn.show();
             Some(btn.upcast())
         }
+
+        // ─── Phase 7: desktop-first widgets via gtk3-rs only ─────────────────
+        //
+        // libadwaita 0.9 + gtk3-rs 0.18 is incompatible at the type-system level
+        // (libadwaita NavigationPage wants GTK4 widgets). Until Phase 8 upgrades
+        // to libadwaita 1.x + gtk4-rs, we emulate the libadwaita component
+        // semantics using plain gtk3-rs widgets.
+
+        "NavigationSplitView" => {
+            // Emulates Adw.NavigationSplitView: child[0] = sidebar, child[1] = content.
+            // Phase 7a: simple HBox split with a fixed sidebar width. Phase 8
+            // (when libadwaita 1.x lands) replaces this with proper AdwNavigationSplitView
+            // which auto-collapses to a bottom bar.
+            let sidebar_container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            sidebar_container.set_size_request(220, -1);
+            sidebar_container.style_context().add_class("sidebar");
+
+            let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            // child[0] = sidebar container (with sidebar widget + HeaderBar title)
+            if let Some(sidebar_node) = node.children.get(0) {
+                if let Some(s) = build_widget(sidebar_node) {
+                    sidebar_container.add(&s);
+                    sidebar_container.show_all();
+                    hbox.add(&sidebar_container);
+                }
+            }
+            // child[1] = content
+            if let Some(content_node) = node.children.get(1) {
+                if let Some(c) = build_widget(content_node) {
+                    hbox.add(&c);
+                }
+            }
+            if let Some(max_w) = node.maxSidebarWidth {
+                sidebar_container.set_size_request(max_w as i32, -1);
+            }
+            if let Some(collapsed) = node.collapsed {
+                // Phase 7a limitation: in collapsed mode the sidebar would move
+                // to the bottom of the window. We log this and keep the wide-layout
+                // visible; Phase 8 will switch to the proper NavigationSplitView.
+                eprintln!(
+                    "[gtk4kt] NavigationSplitView collapsed={} — Phase 7a logs this but keeps wide-layout",
+                    collapsed
+                );
+            }
+            apply_modifier(&hbox, node);
+            hbox.show_all();
+            Some(hbox.upcast::<gtk::Widget>())
+        }
+        "Sidebar" => {
+            // libadwaita 0.9 doesn't have a Sidebar type. Use ListBox.
+            let lb = gtk::ListBox::new();
+            lb.set_selection_mode(gtk::SelectionMode::Single);
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    lb.add(&c);
+                }
+            }
+            apply_modifier(&lb, node);
+            lb.show();
+            Some(lb.upcast::<gtk::Widget>())
+        }
+        "Stack" => {
+            // GtkStack + GtkStackSwitcher for tabbed navigation. Compose-style Stack
+            // { page("Name") { content } } — tag/title from child WidgetNode fields.
+            let stack = gtk::Stack::new();
+            stack.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
+            for child in &node.children {
+                if let Some(w) = build_widget(child) {
+                    let tag = child.tag.clone().unwrap_or_else(|| "page".to_string());
+                    let title = child.title.clone().unwrap_or_else(|| "Page".to_string());
+                    stack.add_titled(&w, &tag, &title);
+                }
+            }
+            // HeaderBar with StackSwitcher (matches desktop app-tab pattern).
+            let header = gtk::HeaderBar::new();
+            let switcher = gtk::StackSwitcher::new();
+            switcher.set_stack(Some(&stack));
+            header.set_title(Some("ika"));
+            header.pack_start(&switcher);
+
+            let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            vbox.add(&header);
+            vbox.add(&stack);
+            vbox.show_all();
+            apply_modifier(&vbox, node);
+            Some(vbox.upcast::<gtk::Widget>())
+        }
+        "NavigationPage" => {
+            // libadwaita 0.9's NavigationPage is GTK4-only. Emulate as a ListBoxRow
+            // with icon + title (sidebar items look the same).
+            let row = gtk::ListBoxRow::new();
+            let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            hbox.set_border_width(8);
+            if let Some(icon_name) = node.icon.as_deref() {
+                let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::Button);
+                hbox.add(&img);
+            }
+            if let Some(title) = node.title.as_deref() {
+                let lbl = gtk::Label::new(Some(title));
+                lbl.set_xalign(0.0);
+                lbl.set_hexpand(true);
+                hbox.add(&lbl);
+            }
+            hbox.show_all();
+            row.add(&hbox);
+            if let Some(handle) = node.on_click_handle {
+                let handle_copy = handle;
+                row.connect_activate(move |_| {
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        f(handle_copy, std::ptr::null());
+                    }
+                });
+            }
+            apply_modifier(&row, node);
+            row.show();
+            Some(row.upcast::<gtk::Widget>())
+        }
+
+        // ─── Phase 7b: PreferencesPage / PreferencesGroup / ActionRow ─────────
+        "PreferencesPage" => {
+            // Emulate Adw.PreferencesPage as a vertical Box containing
+            // PreferencesGroup children.
+            let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    vbox.add(&c);
+                }
+            }
+            apply_modifier(&vbox, node);
+            vbox.show_all();
+            Some(vbox.upcast::<gtk::Widget>())
+        }
+        "PreferencesGroup" => {
+            // Emulate Adw.PreferencesGroup: framed Box with optional title
+            // header. NO CARD styling (flat) — desktop convention.
+            let outer = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            outer.set_border_width(8);
+            if let Some(t) = node.title.as_deref() {
+                let lbl = gtk::Label::new(Some(t));
+                lbl.set_xalign(0.0);
+                lbl.set_margin_top(8);
+                lbl.set_margin_bottom(4);
+                // Use GTK3's "group-title" style class for semantic clarity.
+                lbl.style_context().add_class("group-title");
+                outer.add(&lbl);
+            }
+            if let Some(d) = node.description.as_deref() {
+                let lbl = gtk::Label::new(Some(d));
+                lbl.set_xalign(0.0);
+                lbl.style_context().add_class("group-description");
+                outer.add(&lbl);
+            }
+            // Group body = list box (flat rows separated by a frame, not cards).
+            let list = gtk::ListBox::new();
+            list.set_selection_mode(gtk::SelectionMode::None);
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    list.add(&c);
+                }
+            }
+            outer.add(&list);
+            outer.show_all();
+            apply_modifier(&outer, node);
+            Some(outer.upcast::<gtk::Widget>())
+        }
+        "ActionRow" => {
+            // Emulate Adw.ActionRow: ListBoxRow with title + subtitle + suffix
+            // (the interactive control).
+            let row = gtk::ListBoxRow::new();
+            let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+            hbox.set_border_width(8);
+            // Leading icon (if any)
+            if let Some(icon_name) = node.icon.as_deref() {
+                let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::Button);
+                hbox.add(&img);
+            }
+            // Title + subtitle stack
+            let label_col = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            if let Some(t) = node.title.as_deref() {
+                let title_lbl = gtk::Label::new(Some(t));
+                title_lbl.set_xalign(0.0);
+                title_lbl.set_hexpand(true);
+                label_col.add(&title_lbl);
+            }
+            if let Some(sub) = node.description.as_deref() {
+                let sub_lbl = gtk::Label::new(Some(sub));
+                sub_lbl.set_xalign(0.0);
+                sub_lbl.set_hexpand(true);
+                sub_lbl.style_context().add_class("dim-label");
+                label_col.add(&sub_lbl);
+            }
+            label_col.set_hexpand(true);
+            hbox.add(&label_col);
+            // Suffix widget (the interactive control)
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    hbox.add(&c);
+                }
+            }
+            hbox.show_all();
+            row.add(&hbox);
+            if let Some(handle) = node.on_click_handle {
+                let handle_copy = handle;
+                row.connect_activate(move |_| {
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        f(handle_copy, std::ptr::null());
+                    }
+                });
+            }
+            apply_modifier(&row, node);
+            row.show();
+            Some(row.upcast::<gtk::Widget>())
+        }
+
+        // ─── Phase 7c: ListBox / ListBoxRow / GridView ─────────────────────
+        "ListBox" => {
+            let lb = gtk::ListBox::new();
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    lb.add(&c);
+                }
+            }
+            apply_modifier(&lb, node);
+            lb.show();
+            Some(lb.upcast::<gtk::Widget>())
+        }
+        "ListBoxRow" => {
+            let row = gtk::ListBoxRow::new();
+            let inner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            inner.set_border_width(4);
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    inner.add(&c);
+                }
+            }
+            inner.show_all();
+            row.add(&inner);
+            if let Some(handle) = node.on_click_handle {
+                let handle_copy = handle;
+                row.connect_activate(move |_| {
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        f(handle_copy, std::ptr::null());
+                    }
+                });
+            }
+            apply_modifier(&row, node);
+            row.show();
+            Some(row.upcast::<gtk::Widget>())
+        }
+        "GridView" => {
+            // gtk3-rs 0.18 has GtkFlowBox as the multi-column list widget.
+            let flow = gtk::FlowBox::new();
+            flow.set_orientation(gtk::Orientation::Horizontal);
+            if let Some(cols) = node.columns {
+                flow.set_max_children_per_line(cols.max(1) as u32);
+                flow.set_min_children_per_line(cols.max(1) as u32);
+            }
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    flow.add(&c);
+                }
+            }
+            apply_modifier(&flow, node);
+            flow.show();
+            Some(flow.upcast::<gtk::Widget>())
+        }
+
+        // ─── Phase 7d: StatusPage ───────────────────────────────────────────
+        "StatusPage" => {
+            // Emulate Adw.StatusPage as a centered VBox with icon + title +
+            // description + optional action button. Use ONLY for genuine empty
+            // states (e.g., "No games yet" when library is empty).
+            let vbox = gtk::Box::new(gtk::Orientation::Vertical, 12);
+            vbox.set_valign(gtk::Align::Center);
+            vbox.set_halign(gtk::Align::Center);
+            vbox.set_margin_top(48);
+            vbox.set_margin_bottom(48);
+            if let Some(icon_name) = node.icon.as_deref() {
+                let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::LargeToolbar);
+                img.set_pixel_size(64);
+                vbox.add(&img);
+            }
+            if let Some(t) = node.title.as_deref() {
+                let lbl = gtk::Label::new(None);
+                lbl.set_markup(&format!("<big><b>{}</b></big>", glib::markup_escape_text(t)));
+                vbox.add(&lbl);
+            }
+            if let Some(d) = node.description.as_deref() {
+                let lbl = gtk::Label::new(Some(d));
+                lbl.style_context().add_class("dim-label");
+                lbl.set_max_width_chars(50);
+                lbl.set_line_wrap(true);
+                vbox.add(&lbl);
+            }
+            if let Some(action) = node.children.get(0) {
+                if let Some(c) = build_widget(action) {
+                    vbox.add(&c);
+                }
+            }
+            vbox.show_all();
+            apply_modifier(&vbox, node);
+            Some(vbox.upcast::<gtk::Widget>())
+        }
+
+        // ─── Phase 7g: Toast ────────────────────────────────────────────────
+        "Toast" => {
+            // gtk3-rs 0.18 has no native toast. Use GtkInfoBar (in-app banner)
+            // as the closest analog — non-blocking, can be dismissed.
+            let bar = gtk::InfoBar::new();
+            bar.set_message_type(gtk::MessageType::Info);
+            let lbl = gtk::Label::new(Some(node.title.as_deref().unwrap_or("")));
+            lbl.set_xalign(0.0);
+            bar.set_show_close_button(true);
+            bar.connect_response(|b, _| { b.set_revealed(false); });
+            // Box-wrap for proper alignment.
+            // bar.add_action_widget() not needed for plain label; use container directly
+            bar.add_action_widget(&lbl, gtk::ResponseType::Other(0));
+            bar.set_revealed(true);
+            apply_modifier(&bar, node);
+            bar.show_all();
+            Some(bar.upcast::<gtk::Widget>())
+        }
+
+        // ─── Phase 7f: Popover (already exists but add richer version) ──────
+        // Existing "Popover" handler covers it.
 
         _ => {
             eprintln!("[gtk4kt] unknown widget type: {}", node.widget_type);
