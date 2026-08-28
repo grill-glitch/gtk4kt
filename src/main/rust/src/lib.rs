@@ -38,9 +38,28 @@ pub struct WidgetNode {
     #[serde(default)]
     pub children: Vec<WidgetNode>,
 
+    // Box container properties
+    #[serde(default)]
+    pub spacing: Option<i32>,
+    #[serde(default)]
+    pub orientation: Option<i32>,
+    #[serde(default)]
+    pub margin: Option<i32>,
+
     // Button callback handle (set by Kotlin before JSON is sent)
     #[serde(default)]
     pub on_click_handle: Option<u64>,
+
+    // ─── Phase 4: Compose-like Modifier fields ────────────────────────────
+    #[serde(default)] pub paddingStart: Option<i32>,
+    #[serde(default)] pub paddingEnd: Option<i32>,
+    #[serde(default)] pub paddingTop: Option<i32>,
+    #[serde(default)] pub paddingBottom: Option<i32>,
+    #[serde(default)] pub fillMaxWidth: Option<bool>,
+    #[serde(default)] pub fillMaxHeight: Option<bool>,
+    #[serde(default)] pub halign: Option<i32>,
+    #[serde(default)] pub valign: Option<i32>,
+    #[serde(default)] pub weight: Option<f32>,
 }
 
 // ─── Widget builder ─────────────────────────────────────────────────────────
@@ -78,7 +97,12 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         }
 
         "Box" => {
-            let box_ = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            let orient = match node.orientation {
+                Some(0) => gtk::Orientation::Horizontal,
+                _ => gtk::Orientation::Vertical,
+            };
+            let spacing = node.spacing.unwrap_or(4);
+            let box_ = gtk::Box::new(orient, spacing);
             for child in &node.children {
                 if let Some(c) = build_widget(child) {
                     box_.add(&c);
@@ -104,15 +128,66 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                     }
                 });
             }
+            apply_modifier(&btn, node);
+            btn.show();
+            Some(btn.upcast())
+        }
+
+        // Phase 4b: OutlinedButton — currently identical to Button, but routed
+        // separately so future CSS / libadwaita styling hooks can branch on it.
+        "OutlinedButton" => {
+            let label_str = node.label.as_deref().unwrap_or("Button");
+            let btn = gtk::Button::with_label(label_str);
+            if let Some(handle) = node.on_click_handle {
+                let handle_copy = handle;
+                btn.connect_clicked(move |_| {
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        f(handle_copy, std::ptr::null());
+                    }
+                });
+            }
+            apply_modifier(&btn, node);
             btn.show();
             Some(btn.upcast())
         }
 
         "Label" => {
-            let text_str = node.text.as_deref().unwrap_or("");
+            // Kotlin sends `label` for text content. Fall back to `text` for forward compat.
+            let text_str = node.label.as_deref()
+                .or(node.text.as_deref())
+                .unwrap_or("");
             let lbl = gtk::Label::new(Some(text_str));
+            apply_modifier(&lbl, node);
             lbl.show();
             Some(lbl.upcast())
+        }
+
+        // Phase 4a: Spacer — a non-rendering widget with optional size.
+        // Uses a tiny invisible gtk::Box of the requested axis.
+        "Spacer" => {
+            // Decide orientation from which modifier dimension is set.
+            let vertical = node.height.is_some() || (node.paddingTop.is_some() && node.paddingTop.unwrap_or(0) > 0)
+                || (node.paddingBottom.is_some() && node.paddingBottom.unwrap_or(0) > 0);
+            let orient = if vertical {
+                gtk::Orientation::Vertical
+            } else {
+                gtk::Orientation::Horizontal
+            };
+            let spacer = gtk::Box::new(orient, 0);
+            if let Some(h) = node.height {
+                if h > 0 {
+                    spacer.set_size_request(-1, h);
+                }
+            }
+            if let Some(w) = node.width {
+                if w > 0 {
+                    spacer.set_size_request(w, -1);
+                }
+            }
+            spacer.show();
+            Some(spacer.upcast())
         }
 
         _ => {
@@ -125,13 +200,73 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
         WIDGET_REGISTRY.with(|r| {
             r.borrow_mut().insert(key, w.clone());
         });
-        eprintln!(
-            "[gtk4kt] registered {} -> handle={}",
-            node.widget_type,
-            key
-        );
+        eprintln!("[gtk4kt] registered {} -> handle={}", node.widget_type, key);
     }
     widget
+}
+
+/// Apply Modifier fields (padding/fill/alignment) to a GTK widget.
+/// Called for widgets that accept these properties (Button, Label, ...).
+fn apply_modifier<W: gtk::glib::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
+    // Margin: via container child properties would be ideal, but plain widgets
+    // don't carry it; we leave a no-op here (Phase 4c will wire gtk_container_set_border_width).
+    // Padding for individual widgets: gtk_widget_set_margin_* (CSS classes).
+    if let Some(t) = node.paddingTop {
+        if t > 0 {
+            w.set_margin_top(t as i32);
+        }
+    }
+    if let Some(b) = node.paddingBottom {
+        if b > 0 {
+            w.set_margin_bottom(b as i32);
+        }
+    }
+    if let Some(s) = node.paddingStart {
+        if s > 0 {
+            w.set_margin_start(s as i32);
+        }
+    }
+    if let Some(e) = node.paddingEnd {
+        if e > 0 {
+            w.set_margin_end(e as i32);
+        }
+    }
+    if let Some(w_px) = node.width {
+        if w_px > 0 {
+            w.set_size_request(w_px, -1);
+        }
+    }
+    if let Some(h_px) = node.height {
+        if h_px > 0 {
+            w.set_size_request(-1, h_px);
+        }
+    }
+    if node.fillMaxWidth.unwrap_or(false) {
+        w.set_hexpand(true);
+        w.set_halign(gtk::Align::Fill);
+    }
+    if node.fillMaxHeight.unwrap_or(false) {
+        w.set_vexpand(true);
+        w.set_valign(gtk::Align::Fill);
+    }
+    if let Some(ha) = node.halign {
+        w.set_halign(match ha {
+            0 => gtk::Align::Start,
+            1 => gtk::Align::Center,
+            2 => gtk::Align::End,
+            3 => gtk::Align::Fill,
+            _ => gtk::Align::Start,
+        });
+    }
+    if let Some(va) = node.valign {
+        w.set_valign(match va {
+            0 => gtk::Align::Start,
+            1 => gtk::Align::Center,
+            2 => gtk::Align::End,
+            3 => gtk::Align::Fill,
+            _ => gtk::Align::Start,
+        });
+    }
 }
 
 // ─── Kotlin → Rust upcall registration ──────────────────────────────────────

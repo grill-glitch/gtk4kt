@@ -3,6 +3,7 @@
 package org.librelab.gtk4kt
 
 import org.librelab.gtk4kt.internal.GTKNative
+import org.librelab.gtk4kt.runtime.Modifier
 import java.io.File
 
 /** Serializable description of a GTK widget (serialized to JSON for Rust UI builder). */
@@ -17,6 +18,12 @@ data class WidgetNode(
     val width: Int? = null,
     val height: Int? = null,
     val margin: Int? = null,
+    /**
+     * Optional Modifier (Compose-style) for this widget. Stored as raw JSON
+     * fragment to append during serialization. Set via `modifier` parameter
+     * on the widget builders (Text, Button, etc.).
+     */
+    val modifierJson: String = "",
 )
 
 // ============================================================================
@@ -112,41 +119,119 @@ class ApplicationScope {
 class WindowBuilder {
     internal val children = mutableListOf<WidgetNode>()
 
-    fun column(spacing: Int = 0, block: BoxBuilder.() -> Unit) {
+    fun column(spacing: Int = 0, modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
         val b = BoxBuilder()
         b.block()
-        children.add(WidgetNode("Box", orientation = 1, spacing = spacing, children = b.children.toList()))
+        children.add(
+            WidgetNode("Box", orientation = 1, spacing = spacing, modifierJson = modifier.toJsonFields(),
+                children = b.children.toList())
+        )
     }
 
-    fun row(spacing: Int = 0, block: BoxBuilder.() -> Unit) {
+    fun row(spacing: Int = 0, modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
         val b = BoxBuilder()
         b.block()
-        children.add(WidgetNode("Box", orientation = 0, spacing = spacing, children = b.children.toList()))
+        children.add(
+            WidgetNode("Box", orientation = 0, spacing = spacing, modifierJson = modifier.toJsonFields(),
+                children = b.children.toList())
+        )
     }
 }
 
 class BoxBuilder {
     internal val children = mutableListOf<WidgetNode>()
 
+    /**
+     * Display a line of text. Compose-like API.
+     * `modifier` carries padding / sizing / alignment hints.
+     */
+    fun Text(text: String, modifier: Modifier = Modifier.Empty, id: String? = null) {
+        children.add(
+            WidgetNode("Label", label = text, id = id, modifierJson = modifier.toJsonFields())
+        )
+    }
+
+    /**
+     * Compose-like `Text` overload accepting a String template directly.
+     * Allows `Text("Count: $count")` syntax from Compose.
+     */
+    fun text(text: String, modifier: Modifier = Modifier.Empty, id: String? = null) {
+        Text(text, modifier, id)
+    }
+
+    /** Compose-like `Label` (alias of `Text`). */
+    fun Label(text: String, modifier: Modifier = Modifier.Empty, id: String? = null) {
+        Text(text, modifier, id)
+    }
+
+    /** Backward-compat: lowercase `label` alias of `Text`. */
     fun label(text: String, id: String? = null) {
-        children.add(WidgetNode("Label", label = text, id = id))
+        Text(text, Modifier.Empty, id)
     }
 
-    fun button(label: String, onClick: (() -> Unit)? = null) {
+    /**
+     * Compose-like Button. `onClick` may be null (still creates a clickable
+     * button, just no Kotlin callback wired).
+     */
+    fun Button(
+        label: String,
+        modifier: Modifier = Modifier.Empty,
+        onClick: (() -> Unit)? = null,
+    ) {
         val handleId = onClick?.let { registerCallback(it) } ?: 0L
-        children.add(WidgetNode("Button", label = label, onClick = handleId.takeIf { it != 0L }))
+        children.add(
+            WidgetNode("Button", label = label, modifierJson = modifier.toJsonFields(),
+                onClick = handleId.takeIf { it != 0L })
+        )
     }
 
-    fun column(spacing: Int = 0, block: BoxBuilder.() -> Unit) {
-        val b = BoxBuilder()
-        b.block()
-        children.add(WidgetNode("Box", orientation = 1, spacing = spacing, children = b.children.toList()))
+    /** Lowercase alias matching Compose. */
+    fun button(label: String, modifier: Modifier = Modifier.Empty, onClick: (() -> Unit)? = null) {
+        Button(label, modifier, onClick)
     }
 
-    fun row(spacing: Int = 0, block: BoxBuilder.() -> Unit) {
+    /** OutlinedButton variant (Phase 4b) — for now identical to Button. */
+    fun OutlinedButton(
+        label: String,
+        modifier: Modifier = Modifier.Empty,
+        onClick: (() -> Unit)? = null,
+    ) {
+        val handleId = onClick?.let { registerCallback(it) } ?: 0L
+        children.add(
+            WidgetNode("OutlinedButton", label = label, modifierJson = modifier.toJsonFields(),
+                onClick = handleId.takeIf { it != 0L })
+        )
+    }
+
+    /**
+     * Compose-like Spacer. A Spacer with no modifier does nothing;
+     * with `Modifier.height(8.dp)` it adds vertical gap, with
+     * `Modifier.width(8.dp)` it adds horizontal gap.
+     *
+     * Maps to a GTK Box of the requested orientation with a fixed child size.
+     */
+    fun Spacer(modifier: Modifier = Modifier.Empty) {
+        children.add(WidgetNode("Spacer", modifierJson = modifier.toJsonFields()))
+    }
+
+    fun spacer(modifier: Modifier = Modifier.Empty) = Spacer(modifier)
+
+    fun column(spacing: Int = 0, modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
         val b = BoxBuilder()
         b.block()
-        children.add(WidgetNode("Box", orientation = 0, spacing = spacing, children = b.children.toList()))
+        children.add(
+            WidgetNode("Box", orientation = 1, spacing = spacing, modifierJson = modifier.toJsonFields(),
+                children = b.children.toList())
+        )
+    }
+
+    fun row(spacing: Int = 0, modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        children.add(
+            WidgetNode("Box", orientation = 0, spacing = spacing, modifierJson = modifier.toJsonFields(),
+                children = b.children.toList())
+        )
     }
 }
 
@@ -176,6 +261,8 @@ private fun appendNode(sb: StringBuilder, node: WidgetNode) {
     node.width?.let { sb.append(",\"width\":$it") }
     node.height?.let { sb.append(",\"height\":$it") }
     node.margin?.let { sb.append(",\"margin\":$it") }
+    // Modifier fields (padding/sizing/alignment) — already formatted as JSON fields
+    if (node.modifierJson.isNotEmpty()) sb.append(node.modifierJson)
     if (!node.children.isNullOrEmpty()) {
         sb.append(",\"children\":[")
         node.children.forEachIndexed { i, c ->
