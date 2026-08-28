@@ -606,6 +606,14 @@ fn apply_modifier<W: gtk::glib::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
         w.set_vexpand(true);
         w.set_valign(gtk::Align::Fill);
     }
+    // Phase 5a: weight — Compose-like `Modifier.weight(1f)` in a Row/Column.
+    // In a Box, children with weight > 0 expand to fill the parent's main axis.
+    if let Some(wt) = node.weight {
+        if wt > 0.0 {
+            w.set_hexpand(true);
+            w.set_halign(gtk::Align::Fill);
+        }
+    }
     if let Some(ha) = node.halign {
         w.set_halign(match ha {
             0 => gtk::Align::Start,

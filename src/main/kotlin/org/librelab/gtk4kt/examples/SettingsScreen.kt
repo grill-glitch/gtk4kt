@@ -137,10 +137,11 @@ private fun BoxBuilder.BoolRow(
     value: Boolean,
     onValue: (Boolean) -> Unit,
 ) {
-    // Material Design idiom: text on the left, Switch on the right.
-    // The weight(1f) on the column expands it to fill the row's available
-    // space, pushing the Switch to the trailing edge (right in LTR layouts).
-    // Cross-axis (vertical) centering is GTK's default for Box.
+    // Material Design idiom: text on the left, Switch on the right edge of
+    // the window. The weight(1f) on the column tells GTK Box to expand the
+    // column horizontally (set_hexpand + set_halign=fill in Rust); the Switch
+    // sits in the remaining (unexpanded) space, which lands at the trailing
+    // edge. Cross-axis (vertical) centering is GTK's default for Box.
     row(spacing = 8, modifier = Modifier.fillMaxWidth().padding(0, 8)) {
         column(modifier = Modifier.weight(1f)) {
             Text(label)
