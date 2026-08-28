@@ -50,5 +50,37 @@ private fun WindowBuilder.ComposeDemo() {
         // Aligned text
         Text("Right-aligned", modifier = Modifier.fillMaxWidth().alignEnd())
         Text("Center-aligned", modifier = Modifier.fillMaxWidth().alignCenterHorizontally())
+
+        Spacer(Modifier.height(12))
+
+        // Phase 4c: Card
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Text("Card content", modifier = Modifier.padding(8))
+            Divider()
+            Text("More card content", modifier = Modifier.padding(8))
+        }
+
+        Spacer(Modifier.height(12))
+
+        // Phase 4c: Surface with a row
+        Surface(modifier = Modifier.fillMaxWidth()) {
+            row(spacing = 8) {
+                Text("Surface label", modifier = Modifier.weight(1f))
+                Switch(checked = true) { on ->
+                    System.err.println("[ComposeDemo] switch → $on")
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12))
+
+        // Phase 4c: Slider (use explicit onValueChange param to avoid trailing-lambda confusion)
+        Slider(
+            value = 30f,
+            min = 0f,
+            max = 100f,
+            modifier = Modifier.fillMaxWidth(),
+            onValueChange = { v -> System.err.println("[ComposeDemo] slider → $v") },
+        )
     }
 }

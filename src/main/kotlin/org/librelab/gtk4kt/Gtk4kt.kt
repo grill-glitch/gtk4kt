@@ -18,6 +18,12 @@ data class WidgetNode(
     val width: Int? = null,
     val height: Int? = null,
     val margin: Int? = null,
+    // Phase 4c: control properties
+    val active: Boolean? = null,
+    val onChange: Long? = null,
+    val min: Double? = null,
+    val max: Double? = null,
+    val value: Double? = null,
     /**
      * Optional Modifier (Compose-style) for this widget. Stored as raw JSON
      * fragment to append during serialization. Set via `modifier` parameter
@@ -30,13 +36,21 @@ data class WidgetNode(
 // Callback registry
 // ============================================================================
 
-private val callbackMap = mutableMapOf<Long, () -> Unit>()
+private val callbackMap = mutableMapOf<Long, (Long) -> Unit>()
 private var nextCallbackId = 1L
 
 private fun registerCallback(fn: () -> Unit): Long {
     val id = nextCallbackId++
-    callbackMap[id] = fn
+    callbackMap[id] = { _ -> fn() }
     System.err.println("[gtk4kt] callback registered: id=$id")
+    return id
+}
+
+/** Register a callback that receives the raw value from Rust (0/1 for switch, int for slider). */
+private fun registerValueCallback(fn: (Long) -> Unit): Long {
+    val id = nextCallbackId++
+    callbackMap[id] = fn
+    System.err.println("[gtk4kt] value callback registered: id=$id")
     return id
 }
 
@@ -63,8 +77,8 @@ fun application(appId: String, block: ApplicationScope.() -> Unit) {
     val gtkThread = Thread {
         GTKNative.gtkInit();
         // Register the invoker so Rust can call back into Kotlin's onClick handlers.
-        GTKNative.gtkRegisterInvoker { handle, _ ->
-            callbackMap[handle]?.invoke()
+        GTKNative.gtkRegisterInvoker { handle, value ->
+            callbackMap[handle]?.invoke(value)
         };
         // Register UI JSON path first; gtkApplicationRun reads it.
         GTKNative.gtkSetUiJsonPath(jsonFile.absolutePath);
@@ -204,6 +218,92 @@ class BoxBuilder {
     }
 
     /**
+     * Compose-like Card — a bordered container with elevation-like shadow.
+     * `block` receives a BoxBuilder scope for its content.
+     */
+    fun Card(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        children.add(
+            WidgetNode("Card", modifierJson = modifier.toJsonFields(), children = b.children.toList())
+        )
+    }
+
+    fun card(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) = Card(modifier, block)
+
+    /**
+     * Compose-like Surface — same as Card for now (Frame container).
+     */
+    fun Surface(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        children.add(
+            WidgetNode("Surface", modifierJson = modifier.toJsonFields(), children = b.children.toList())
+        )
+    }
+
+    fun surface(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) = Surface(modifier, block)
+
+    /**
+     * Compose-like Divider — a horizontal line. Use orientation 0 for vertical.
+     */
+    fun Divider(modifier: Modifier = Modifier.Empty, vertical: Boolean = false) {
+        children.add(
+            WidgetNode("Divider", orientation = if (vertical) 0 else 1, modifierJson = modifier.toJsonFields())
+        )
+    }
+
+    fun divider(modifier: Modifier = Modifier.Empty, vertical: Boolean = false) = Divider(modifier, vertical)
+
+    /**
+     * Compose-like Switch — boolean toggle. `onCheckedChange` receives the new state.
+     */
+    fun Switch(
+        checked: Boolean = false,
+        modifier: Modifier = Modifier.Empty,
+        onCheckedChange: ((Boolean) -> Unit)? = null,
+    ) {
+        val handleId = onCheckedChange?.let { registerValueCallback { v -> onCheckedChange(v != 0L) } } ?: 0L
+        children.add(
+            WidgetNode("Switch", active = checked, modifierJson = modifier.toJsonFields(),
+                onChange = handleId.takeIf { it != 0L })
+        )
+    }
+
+    fun switch(
+        checked: Boolean = false,
+        modifier: Modifier = Modifier.Empty,
+        onCheckedChange: ((Boolean) -> Unit)? = null,
+    ) = Switch(checked, modifier, onCheckedChange)
+
+    /**
+     * Compose-like Slider — range input. `onValueChange` receives the new value.
+     * min/max default to 0..100.
+     */
+    fun Slider(
+        value: Float = 0f,
+        modifier: Modifier = Modifier.Empty,
+        onValueChange: ((Float) -> Unit)? = null,
+        min: Float = 0f,
+        max: Float = 100f,
+    ) {
+        val handleId = onValueChange?.let { registerValueCallback { v -> onValueChange(v.toFloat()) } } ?: 0L
+        children.add(
+            WidgetNode("Slider", modifierJson = modifier.toJsonFields(),
+                onChange = handleId.takeIf { it != 0L },
+                min = min.toDouble(), max = max.toDouble(), value = value.toDouble())
+        )
+    }
+
+    fun slider(
+        value: Float = 0f,
+        modifier: Modifier = Modifier.Empty,
+        onValueChange: ((Float) -> Unit)? = null,
+        min: Float = 0f,
+        max: Float = 100f,
+    ) = Slider(value, modifier, onValueChange, min, max)
+
+    /**
      * Compose-like Spacer. A Spacer with no modifier does nothing;
      * with `Modifier.height(8.dp)` it adds vertical gap, with
      * `Modifier.width(8.dp)` it adds horizontal gap.
@@ -261,6 +361,12 @@ private fun appendNode(sb: StringBuilder, node: WidgetNode) {
     node.width?.let { sb.append(",\"width\":$it") }
     node.height?.let { sb.append(",\"height\":$it") }
     node.margin?.let { sb.append(",\"margin\":$it") }
+    // Phase 4c: control properties
+    node.active?.let { sb.append(",\"active\":$it") }
+    node.onChange?.let { sb.append(",\"on_change_handle\":$it") }
+    node.min?.let { sb.append(",\"min\":$it") }
+    node.max?.let { sb.append(",\"max\":$it") }
+    node.value?.let { sb.append(",\"value\":$it") }
     // Modifier fields (padding/sizing/alignment) — already formatted as JSON fields
     if (node.modifierJson.isNotEmpty()) sb.append(node.modifierJson)
     if (!node.children.isNullOrEmpty()) {

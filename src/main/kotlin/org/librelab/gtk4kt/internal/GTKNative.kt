@@ -57,12 +57,22 @@ object GTKNative {
      * Register a Kotlin callback so Rust can call back into Kotlin.
      * Uses JNA upcall mechanism.
      */
-    fun gtkRegisterInvoker(callback: (handle: Long, ptr: Long) -> Unit) {
+    fun gtkRegisterInvoker(callback: (handle: Long, value: Long) -> Unit) {
         // Create a concrete JNA callback implementation
         val invoker = object : Callback {
             @Throws(Throwable::class)
             fun invoke(handle: Long, ptr: Pointer?) {
-                callback(handle, 0L)
+                // Extract raw address from Pointer (peer field is protected in JNA).
+                val value = if (ptr == null) 0L else {
+                    try {
+                        val f = Pointer::class.java.getDeclaredField("peer")
+                        f.isAccessible = true
+                        f.getLong(ptr)
+                    } catch (e: Exception) {
+                        0L
+                    }
+                }
+                callback(handle, value)
             }
         }
         val fp = CallbackReference.getFunctionPointer(invoker)

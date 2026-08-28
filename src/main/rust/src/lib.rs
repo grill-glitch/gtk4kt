@@ -60,6 +60,13 @@ pub struct WidgetNode {
     #[serde(default)] pub halign: Option<i32>,
     #[serde(default)] pub valign: Option<i32>,
     #[serde(default)] pub weight: Option<f32>,
+
+    // ─── Phase 4c: control properties ─────────────────────────────────────
+    #[serde(default)] pub active: Option<bool>,
+    #[serde(default)] pub on_change_handle: Option<u64>,
+    #[serde(default)] pub min: Option<f64>,
+    #[serde(default)] pub max: Option<f64>,
+    #[serde(default)] pub value: Option<f64>,
 }
 
 // ─── Widget builder ─────────────────────────────────────────────────────────
@@ -188,6 +195,81 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             }
             spacer.show();
             Some(spacer.upcast())
+        }
+
+        // Phase 4c: Card / Surface — a bordered Frame with optional label shadow.
+        // Currently maps to gtk::Frame with optional shadow type.
+        "Card" | "Surface" => {
+            let frame = gtk::Frame::new(None);
+            frame.set_shadow_type(gtk::ShadowType::EtchedIn);
+            for child in &node.children {
+                if let Some(c) = build_widget(child) {
+                    frame.add(&c);
+                }
+            }
+            frame.show_all();
+            Some(frame.upcast())
+        }
+
+        // Phase 4c: Divider — horizontal (or vertical) separator line.
+        "Divider" => {
+            let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+            if node.orientation == Some(0) {
+                sep.set_orientation(gtk::Orientation::Vertical);
+            }
+            apply_modifier(&sep, node);
+            sep.show();
+            Some(sep.upcast())
+        }
+
+        // Phase 4c: Switch — boolean toggle; onChange handle calls Kotlin with 1/0.
+        "Switch" => {
+            let sw = gtk::Switch::new();
+            if let Some(active) = node.active {
+                sw.set_active(active);
+            }
+            if let Some(handle) = node.on_change_handle {
+                let handle_copy = handle;
+                sw.connect_active_notify(move |s| {
+                    let v: i64 = if s.is_active() { 1 } else { 0 };
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        // Pack value into ptr low bits (small int) — a pragmatic
+                        // shortcut; Phase 5 will introduce a typed value channel.
+                        f(handle_copy, v as usize as *const std::ffi::c_void);
+                    }
+                });
+            }
+            apply_modifier(&sw, node);
+            sw.show();
+            Some(sw.upcast())
+        }
+
+        // Phase 4c: Slider — a gtk::Scale with min/max/value.
+        "Slider" => {
+            let min = node.min.unwrap_or(0.0);
+            let max = node.max.unwrap_or(100.0);
+            let val = node.value.unwrap_or(min);
+            let adj = gtk::Adjustment::new(val, min, max, 1.0, 10.0, 0.0);
+            let scale = gtk::Scale::new(gtk::Orientation::Horizontal, Some(&adj));
+            if let Some(handle) = node.on_change_handle {
+                let handle_copy = handle;
+                let adj_copy = adj.clone();
+                scale.connect_value_changed(move |s| {
+                    let v = s.value();
+                    let _ = adj_copy.value();
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        // Pack float bits into pointer (value channel Phase 5).
+                        f(handle_copy, (v as i64) as usize as *const std::ffi::c_void);
+                    }
+                });
+            }
+            apply_modifier(&scale, node);
+            scale.show();
+            Some(scale.upcast())
         }
 
         _ => {
