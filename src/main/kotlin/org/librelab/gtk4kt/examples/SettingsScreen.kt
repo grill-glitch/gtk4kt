@@ -137,6 +137,10 @@ private fun BoxBuilder.BoolRow(
     value: Boolean,
     onValue: (Boolean) -> Unit,
 ) {
+    // Material Design idiom: text on the left, Switch on the right.
+    // The weight(1f) on the column expands it to fill the row's available
+    // space, pushing the Switch to the trailing edge (right in LTR layouts).
+    // Cross-axis (vertical) centering is GTK's default for Box.
     row(spacing = 8, modifier = Modifier.fillMaxWidth().padding(0, 8)) {
         column(modifier = Modifier.weight(1f)) {
             Text(label)
@@ -154,6 +158,7 @@ private fun BoxBuilder.DropdownRow(
     options: List<Pair<String, String>>,
     onSelect: (String) -> Unit,
 ) {
+    // Same Material Design idiom as BoolRow: label left, dropdown trigger right.
     row(spacing = 8, modifier = Modifier.fillMaxWidth().padding(0, 8)) {
         Text(label, modifier = Modifier.weight(1f))
         DropdownMenu(label = value) {
