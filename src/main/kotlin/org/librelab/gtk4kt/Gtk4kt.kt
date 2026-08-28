@@ -54,14 +54,13 @@ fun application(appId: String, block: ApplicationScope.() -> Unit) {
     val app = GTKNative.gtkApplicationNew(appId)
     require(app != GTKNative.NULL_PTR) { "failed to create GTK application" }
 
-    // Set up the activate callback to create the window
-    // (done in gtk_application_run via internal hook)
+    // The block creates widgets INSIDE the activate callback
+    // We pass appPtr so window() can create GtkApplicationWindow with it
     ApplicationScope(app).apply {
-        currentWindow = null
         block()
     }
 
-    // gtk_application_run blocks; the activate callback above creates the window
+    // gtk_application_run blocks until quit; activate signal fires synchronously
     GTKNative.gtkApplicationRun(app)
 }
 
@@ -85,7 +84,7 @@ class ApplicationScope(private val appPtr: Long) {
         height: Int = 600,
         block: WindowScope.() -> Unit
     ): WindowRef {
-        val win = GTKNative.gtkWindowNew()
+        val win = GTKNative.gtkWindowNew(appPtr)
         require(win != GTKNative.NULL_PTR) { "failed to create window" }
         GTKNative.gtkWindowSetTitle(win, title)
         GTKNative.gtkWindowSetDefaultSize(win, width, height)
@@ -116,9 +115,8 @@ class WindowScope(private val windowPtr: Long) {
      * Replaces any previously set child.
      */
     fun child(widget: Widget) {
-        // For now, set as direct child. In full implementation,
-        // contentBox is set as window child and widget is appended to contentBox.
         GTKNative.gtkWidgetShow(widget.ptr)
+        GTKNative.gtkWindowSetChild(windowPtr, widget.ptr)
     }
 
     /**
@@ -149,18 +147,19 @@ fun label(text: String): Widget {
 }
 
 /**
- * Create a Button widget.
+ * Create a Button widget with an optional click handler.
  *
  * Usage:
  * ```
  * button("Click me!") {
- *     println("clicked!")
+ *     count.value = count.value + 1
  * }
  * ```
  */
 fun button(label: String, onClicked: () -> Unit = {}): Widget {
     val ptr = GTKNative.gtkButtonNewWithLabel(label)
     require(ptr != GTKNative.NULL_PTR) { "failed to create button" }
+    // TODO: wire up onClicked via Panama callback (Phase 2 onClick implementation)
     return Widget(ptr).also { GTKNative.gtkWidgetShow(it.ptr) }
 }
 

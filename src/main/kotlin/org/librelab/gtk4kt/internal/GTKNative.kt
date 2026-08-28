@@ -67,7 +67,7 @@ object GTKNative {
     )
     private val hWinNew = linker.downcallHandle(
         sym("gtk_bridge_window_new"),
-        FunctionDescriptor.of(ValueLayout.JAVA_LONG)
+        FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG)
     )
     private val hWinSetTitle = linker.downcallHandle(
         sym("gtk_bridge_window_set_title"),
@@ -76,6 +76,10 @@ object GTKNative {
     private val hWinSetDefaultSize = linker.downcallHandle(
         sym("gtk_bridge_window_set_default_size"),
         FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)
+    )
+    private val hWinSetChild = linker.downcallHandle(
+        sym("gtk_bridge_window_set_child"),
+        FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG)
     )
     private val hWinPresent = linker.downcallHandle(
         sym("gtk_bridge_window_present"),
@@ -125,6 +129,26 @@ object GTKNative {
         sym("gtk_bridge_widget_set_margin"),
         FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT)
     )
+    private val hWidgetSetSizeRequest = linker.downcallHandle(
+        sym("gtk_bridge_widget_set_size_request"),
+        FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)
+    )
+    private val hWidgetSetHexpand = linker.downcallHandle(
+        sym("gtk_bridge_widget_set_hexpand"),
+        FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT)
+    )
+    private val hWidgetSetVexpand = linker.downcallHandle(
+        sym("gtk_bridge_widget_set_vexpand"),
+        FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT)
+    )
+    private val hWidgetSetHalign = linker.downcallHandle(
+        sym("gtk_bridge_widget_set_halign"),
+        FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT)
+    )
+    private val hWidgetSetValign = linker.downcallHandle(
+        sym("gtk_bridge_widget_set_valign"),
+        FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT)
+    )
 
     // ========================================================================
     // Kotlin wrappers
@@ -139,13 +163,16 @@ object GTKNative {
 
     fun gtkMainQuit() { hQuit.invoke() }
 
-    fun gtkWindowNew(): Long = hWinNew.invoke() as Long
+    fun gtkWindowNew(appPtr: Long): Long = hWinNew.invoke(appPtr) as Long
 
     fun gtkWindowSetTitle(windowPtr: Long, title: String) =
         hWinSetTitle.invoke(windowPtr, cstr(title))
 
     fun gtkWindowSetDefaultSize(windowPtr: Long, width: Int, height: Int) =
         hWinSetDefaultSize.invoke(windowPtr, width, height)
+
+    fun gtkWindowSetChild(windowPtr: Long, childPtr: Long) =
+        hWinSetChild.invoke(windowPtr, childPtr)
 
     fun gtkWindowPresent(windowPtr: Long) = hWinPresent.invoke(windowPtr)
 
@@ -179,6 +206,21 @@ object GTKNative {
 
     fun gtkWidgetSetMargin(widgetPtr: Long, margin: Int) =
         hWidgetSetMargin.invoke(widgetPtr, margin)
+
+    fun gtkWidgetSetSizeRequest(widgetPtr: Long, w: Int, h: Int) =
+        hWidgetSetSizeRequest.invoke(widgetPtr, w, h)
+
+    fun gtkWidgetSetHexpand(widgetPtr: Long, expand: Int) =
+        hWidgetSetHexpand.invoke(widgetPtr, expand)
+
+    fun gtkWidgetSetVexpand(widgetPtr: Long, expand: Int) =
+        hWidgetSetVexpand.invoke(widgetPtr, expand)
+
+    fun gtkWidgetSetHalign(widgetPtr: Long, align: Int) =
+        hWidgetSetHalign.invoke(widgetPtr, align)
+
+    fun gtkWidgetSetValign(widgetPtr: Long, align: Int) =
+        hWidgetSetValign.invoke(widgetPtr, align)
 
     // ========================================================================
     // Constants
