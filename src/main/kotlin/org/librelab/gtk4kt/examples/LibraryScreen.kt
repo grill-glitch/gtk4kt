@@ -53,8 +53,11 @@ fun LibraryScreen() {
         body {
             // AppShell = a Box containing Sidebar + ContentStack. We
             // implement as a flat HBox with no panel chrome.
+            //
+            // Phase 8 R3: sidebar is 200px (was 240). Compact desktop nav,
+            // not a slab.
             NavigationSplitView(
-                maxSidebarWidth = Design.sidebarWidth.toDouble(),
+                maxSidebarWidth = 200.0,
                 sidebar = {
                     Sidebar(Modifier.Empty) {
                         // Sidebar header (small caps "ika")
@@ -154,6 +157,8 @@ private fun BoxBuilder.LibraryPage(
             subtitle = "${games.size} games",
             trailing = {
                 // Search entry + settings shortcut — flat, sit inline.
+                // Phase 8 R3: min-width tightened (240→200) so the search
+                // doesn't dominate the header.
                 OutlinedTextField(
                     placeholder = "Search…",
                     modifier = Modifier.Empty.classes(Design.CLS_SEARCH_ENTRY),
@@ -166,33 +171,60 @@ private fun BoxBuilder.LibraryPage(
             },
         )
 
-        // Two-pane: list + selected detail. ListBox on the left, info card on
-        // the right. Both share the available content width.
+        // Two-pane: list (flex) + selected detail (fixed). No card chrome
+        // on the right pane — just a typographic detail block with a
+        // single primary action (Play) and a subtle secondary (Details).
         row(spacing = 0, modifier = Modifier.fillMaxSize()) {
             // Game list — flat rows, every row carries the full identity.
             ListBox(modifier = Modifier.weight(1f).fillMaxHeight().classes(Design.CLS_CONTENT_LIST)) {
                 for (game in games) {
-                        GameListRow(
-                            game = game,
-                            selected = selectedGame == game,
-                            onClick = { onSelectGame(game) },
-                        )
-                    }
+                    GameListRow(
+                        game = game,
+                        selected = selectedGame == game,
+                        onClick = { onSelectGame(game) },
+                    )
+                }
             }
-            // Detail pane — only visible when there's room (≥1500px). For
-            // Phase 8 we'll always show it; Phase 8b will hide it below 1500.
+
+            // Detail pane. Phase 8 R3: tighter hierarchy, no floating blocks.
+            //   Eyebrow → Title (wraps) → Type → metadata → primary CTA →
+            //   secondary (subtle). Pane is 320px wide; if you need to fit
+            //   longer titles, rely on TextView wrap, not horizontal scroll.
             column(
-                spacing = Design.s4,
-                modifier = Modifier.size(360, 0).fillMaxHeight().padding(Design.s6, Design.s6, Design.s6, 0),
+                spacing = Design.s3,
+                modifier = Modifier.size(320, 0).fillMaxHeight()
+                    .classes(Design.CLS_DETAIL_PANE)
+                    .padding(Design.s8, Design.s6, Design.s8, Design.s6),
             ) {
-                Spacer(modifier = Modifier.size(Design.s2, 0))
-                Text("Selected", modifier = Modifier.Empty.classes(Design.CLS_SECTION_TITLE))
-                Text(selectedGame.name, modifier = Modifier.Empty.classes(Design.CLS_PAGE_TITLE))
+                Text("SELECTED", modifier = Modifier.Empty.classes(Design.CLS_SECTION_TITLE))
+                // Title — wraps if needed (CJK / long names).
+                Text(
+                    selectedGame.name,
+                    modifier = Modifier.fillMaxWidth().classes(Design.CLS_PAGE_TITLE),
+                )
                 Text(selectedGame.typeLabel, modifier = Modifier.Empty.classes(Design.CLS_PAGE_SUBTITLE))
-                Spacer(modifier = Modifier.size(Design.s4, 0))
-                Button("Play", onClick = { System.err.println("[Library] play ${selectedGame.name}") })
                 Spacer(modifier = Modifier.size(Design.s2, 0))
-                OutlinedButton("Details", onClick = { System.err.println("[Library] details ${selectedGame.name}") })
+                // Last played as dim metadata under the title — anchors the
+                // block in time without adding fake stats.
+                Text(
+                    "Played ${selectedGame.lastPlayed}",
+                    modifier = Modifier.Empty.classes(Design.CLS_TEXT_METADATA),
+                )
+                Spacer(modifier = Modifier.size(Design.s4, 0))
+
+                // Primary CTA — accent-filled, with play icon prefix.
+                Button(
+                    "Play",
+                    modifier = Modifier.Empty.classes(Design.CLS_BUTTON_SUGGESTED),
+                    onClick = { System.err.println("[Library] play ${selectedGame.name}") },
+                )
+                Spacer(modifier = Modifier.size(Design.s2, 0))
+                // Secondary action — subtle flat outline, NOT a primary button.
+                OutlinedButton(
+                    "Details",
+                    modifier = Modifier.Empty.classes(Design.CLS_BUTTON_FLAT),
+                    onClick = { System.err.println("[Library] details ${selectedGame.name}") },
+                )
             }
         }
     }
@@ -222,14 +254,11 @@ private fun BoxBuilder.GameListRow(
             Text(game.typeLabel, modifier = Modifier.Empty.classes(Design.CLS_TEXT_SUBTITLE))
         }
 
-        // Metadata (right-aligned, dim).
+        // Metadata (right-aligned, dim). Play is a per-row action that we
+        // intentionally omit here — the whole row is clickable, and the
+        // primary Play CTA lives in the detail pane (Phase 8 R3: kill
+        // the trailing gray placeholder block).
         Text(game.lastPlayed, modifier = Modifier.Empty.classes(Design.CLS_TEXT_METADATA))
-        Spacer(modifier = Modifier.size(Design.s4, 0))
-
-        // Trailing action (subtle). Hover state is implicit via row hover.
-        IconButton("media-playback-start") {
-            System.err.println("[Library] play ${game.name}")
-        }
     }
 }
 

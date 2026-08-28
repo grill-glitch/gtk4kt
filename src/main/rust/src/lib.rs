@@ -1096,7 +1096,7 @@ headerbar button {
 .sidebar,
 .sidebar list,
 .sidebar list > row {
-    background: transparent;
+    background: @theme_bg_color;
     border: none;
 }
 .sidebar list > row {
@@ -1163,12 +1163,12 @@ headerbar button {
 
 /* Game cover thumbnail — 48px square, rounded. */
 .thumb {
-    background: alpha(@theme_fg_color, 0.05);
-    border-radius: 9px;
-    min-width: 48px;
-    min-height: 48px;
-    padding: 12px;
-    color: alpha(@theme_fg_color, 0.45);
+    background: alpha(@theme_fg_color, 0.04);
+    border-radius: 6px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
+    color: alpha(@theme_fg_color, 0.40);
 }
 
 /* Page title (large heading at top of content). */
@@ -1245,12 +1245,15 @@ headerbar button {
 }
 
 /* Buttons: flat-ish with subtle hover. */
-button.flat {
+button.flat,
+.outlined-button {
     background: transparent;
     border: 1px solid alpha(@theme_fg_color, 0.12);
     border-radius: 6px;
     padding: 7px 14px;
     color: @theme_fg_color;
+    font-weight: 400;
+    min-width: 96px;
 }
 button.flat:hover {
     background: alpha(@theme_fg_color, 0.05);
@@ -1259,9 +1262,10 @@ button.suggested-action {
     background: #3584e4;
     border: none;
     border-radius: 6px;
-    padding: 7px 14px;
+    padding: 8px 16px;
     color: white;
-    font-weight: 500;
+    font-weight: 600;
+    min-width: 96px;
 }
 button.suggested-action:hover {
     background: #2d76d8;
@@ -1274,17 +1278,33 @@ switch {
 
 /* Search entry (Phase 8 top-bar search). */
 .search-entry {
-    background: alpha(@theme_fg_color, 0.05);
+    background: alpha(@theme_fg_color, 0.04);
     border: 1px solid alpha(@theme_fg_color, 0.08);
     border-radius: 6px;
-    padding: 6px 12px;
-    min-width: 240px;
-    margin: 4px 8px;
+    padding: 5px 10px;
+    min-width: 180px;
+    max-width: 240px;
+    margin: 4px 0;
     color: @theme_fg_color;
 }
 .search-entry:focus {
     border-color: #3584e4;
     background: white;
+}
+
+
+/* Detail pane (right side, Phase 8 R3): transparent, no card chrome.
+   Visual hierarchy comes from typography (eyebrow → title → type →
+   metadata) plus the single accent CTA. No borders, no surfaces. */
+.detail-pane {
+    background: @theme_bg_color;
+    border-left: 1px solid alpha(@theme_fg_color, 0.06);
+    padding: 24px;
+}
+.detail-pane .page-title {
+    font-size: 20px;
+    line-height: 1.25;
+    margin: 4px 0 0 0;
 }
 
 /* Hide default separator lines from ListBoxRow (we draw our own). */

@@ -34,7 +34,7 @@ object Design {
     const val rLg = 12
 
     // ─── Component sizes ───────────────────────────────────────────────────
-    const val sidebarWidth = 240
+    const val sidebarWidth = 200
     const val thumbSize = 48
     const val rowHeight = 64
     const val headerHeight = 44
@@ -57,6 +57,8 @@ object Design {
     const val CLS_PAGE_TITLE = "page-title"
     /** Page subtitle (small, dim). */
     const val CLS_PAGE_SUBTITLE = "page-subtitle"
+    /** Detail pane container (right side, transparent). */
+    const val CLS_DETAIL_PANE = "detail-pane"
     /** Section title (small caps). */
     const val CLS_SECTION_TITLE = "section-title"
 
