@@ -10,6 +10,7 @@ name = "gtk4kt_native"
 [dependencies]
 # gtk3-rs has gtk_main() / gtk_main_quit() — gtk4-rs removed them
 gtk = { version = "0.18", features = ["v3_24"] }
+cairo-rs = { version = "0.18", features = ["use_glib", "png"] }
 glib = { version = "0.22" }
 gio = { version = "0.22" }
 log = "0.4"

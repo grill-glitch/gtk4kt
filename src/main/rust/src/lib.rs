@@ -744,6 +744,121 @@ pub extern "C" fn gtk_bridge_set_init_latch(latch_addr: *const std::ffi::c_void)
     eprintln!("[gtk4kt] gtk_bridge_set_init_latch: {:016x}", latch_addr as usize);
 }
 
+
+/// Render the main window (WIDGET_REGISTRY handle=1) offscreen to a PNG file.
+/// Uses GTK's own drawing machinery via Cairo — works even without a window
+/// manager / visible display (Xwayland headless).
+///
+/// Returns 0 on success, non-zero on failure. Path is UTF-8 C string.
+#[no_mangle]
+pub extern "C" fn gtk_bridge_save_screenshot(path_ptr: *const std::ffi::c_char) -> i32 {
+    if path_ptr.is_null() {
+        eprintln!("[gtk4kt] save_screenshot: null path");
+        return -1;
+    }
+    let path = unsafe { std::ffi::CStr::from_ptr(path_ptr).to_string_lossy().into_owned() };
+
+    // Find the top-level window in the registry (handle=1 is the window).
+    let window_widget: Option<gtk::Widget> = WIDGET_REGISTRY.with(|r| {
+        let reg = r.borrow();
+        reg.get(&1).cloned()
+    });
+    let window = match window_widget {
+        Some(w) => w,
+        None => {
+            eprintln!("[gtk4kt] save_screenshot: no window in registry (handle=1)");
+            return -2;
+        }
+    };
+
+    // Determine size: prefer the window's current allocation, fall back to
+    // size_request() (returns a (width, height) tuple).
+    let (w_px, h_px) = {
+        let alloc = window.allocation();
+        if alloc.width() > 1 && alloc.height() > 1 {
+            (alloc.width(), alloc.height())
+        } else {
+            let (rw, rh) = window.size_request();
+            (rw.max(1), rh.max(1))
+        }
+    };
+    eprintln!("[gtk4kt] save_screenshot: size = {}x{}", w_px, h_px);
+
+    // Ensure realized so drawing works.
+    if !window.is_drawable() {
+        window.realize();
+    }
+    // Force a size allocation so layout happens.
+    {
+        // gdk::Rectangle wraps GdkRectangle via BoxedInline; construct with
+        // the ffi-compatible builder (fields via deref).
+        let mut alloc = gtk::Allocation::new(0, 0, w_px, h_px);
+        window.size_allocate(&mut alloc);
+    }
+
+    // Create a Cairo image surface and render the window into it.
+    let surface = match cairo::ImageSurface::create(
+        cairo::Format::ARgb32,
+        w_px,
+        h_px,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[gtk4kt] save_screenshot: surface create failed: {:?}", e);
+            return -3;
+        }
+    };
+    {
+        let cr = match cairo::Context::new(&surface) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[gtk4kt] save_screenshot: context failed: {:?}", e);
+                return -4;
+            }
+        };
+        // Paint background (GTK windows are transparent ARGB; fill white first).
+        cr.set_source_rgb(0.95, 0.95, 0.95);
+        cr.paint();
+        // Draw the window widget tree.
+        window.draw(&cr);
+    }
+    // Flush to surface and write PNG via the stream API (cairo_surface_write_to_png
+    // is behind a feature; the stream version is always available).
+    let file = match std::fs::File::create(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[gtk4kt] save_screenshot: file create failed: {:?}", e);
+            return -4;
+        }
+    };
+    let surface_ptr = surface.to_raw_none();
+    extern "C" fn png_write_cb(
+        closure: *mut std::ffi::c_void,
+        data: *const u8,
+        length: usize,
+    ) -> cairo::ffi::cairo_status_t {
+        unsafe {
+            let file = &mut *(closure as *mut std::io::BufWriter<std::fs::File>);
+            use std::io::Write;
+            match file.write_all(std::slice::from_raw_parts(data, length)) {
+                Ok(()) => 0, // CAIRO_STATUS_SUCCESS
+                Err(_) => 5, // CAIRO_STATUS_WRITE_ERROR
+            }
+        }
+    }
+    let mut writer = std::io::BufWriter::new(file);
+    match unsafe { cairo::Surface::from_raw_none(surface.to_raw_none()) }.write_to_png(&mut writer) {
+        Ok(()) => {
+            eprintln!("[gtk4kt] save_screenshot: wrote {}", path);
+            0
+        }
+        Err(e) => {
+            eprintln!("[gtk4kt] save_screenshot: write failed: {:?}", e);
+            -4
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn gtk_bridge_application_run(_app_ptr: u64, _latch_addr: u64) -> i32 {
     // Don't call gtk::init() here — gtk_bridge_init already did, and calling
@@ -773,6 +888,14 @@ pub extern "C" fn gtk_bridge_application_run(_app_ptr: u64, _latch_addr: u64) ->
                     Ok(root) => {
                         eprintln!("[gtk4kt] building UI...");
                         let _ = build_widget(&root);
+                        // Phase 6 preview: save an offscreen screenshot of the
+                        // window (only when GTK4KT_SCREENSHOT env is set).
+                        if std::env::var("GTK4KT_SCREENSHOT").is_ok() {
+                            let shot_path = std::env::var("GTK4KT_SCREENSHOT")
+                                .unwrap_or_else(|_| "/tmp/gtk4kt_preview.png".to_string());
+                            let c_path = std::ffi::CString::new(shot_path).unwrap();
+                            gtk_bridge_save_screenshot(c_path.as_ptr());
+                        }
                     }
                     Err(e) => eprintln!("[gtk4kt] JSON parse error: {}", e),
                 }
