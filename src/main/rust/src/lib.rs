@@ -694,7 +694,12 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                 lbl.set_hexpand(true);
                 hbox.add(&lbl);
             }
+            // Ensure the row has enough height for the label column. ListBoxRow
+            // with default sizing can clip child content; explicit min-height
+            // request helps the renderer allocate space.
             hbox.show_all();
+            hbox.set_size_request(-1, 48);
+            row.set_size_request(-1, 48);
             row.add(&hbox);
             if let Some(handle) = node.on_click_handle {
                 let handle_copy = handle;
@@ -769,23 +774,30 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
                 let img = gtk::Image::from_icon_name(Some(icon_name), gtk::IconSize::Button);
                 hbox.add(&img);
             }
-            // Title + subtitle stack
+            // Title + subtitle stack. The label column must expand so labels
+            // have space; ListBoxRow's child allocation can otherwise hide them.
             let label_col = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            label_col.set_size_request(200, -1);
             if let Some(t) = node.title.as_deref() {
                 let title_lbl = gtk::Label::new(Some(t));
                 title_lbl.set_xalign(0.0);
                 title_lbl.set_hexpand(true);
+                title_lbl.set_halign(gtk::Align::Start);
+                title_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 label_col.add(&title_lbl);
             }
             if let Some(sub) = node.description.as_deref() {
                 let sub_lbl = gtk::Label::new(Some(sub));
                 sub_lbl.set_xalign(0.0);
                 sub_lbl.set_hexpand(true);
+                sub_lbl.set_halign(gtk::Align::Start);
+                sub_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 sub_lbl.style_context().add_class("dim-label");
                 label_col.add(&sub_lbl);
             }
             label_col.set_hexpand(true);
-            hbox.add(&label_col);
+            label_col.set_halign(gtk::Align::Fill);
+            hbox.pack_start(&label_col, true, true, 0);
             // Suffix widget (the interactive control)
             for child in &node.children {
                 if let Some(c) = build_widget(child) {

@@ -43,12 +43,12 @@ enum class NavPage { Library, Recent, Settings, About }
  */
 fun LibraryScreen() {
     val state = LibraryState.HasGames
-    val activeNavPage = remember("navPage", NavPage.Library)
+    val activeNavPage = remember("navPage", NavPage.Settings)
     val settingsRoot = remember("settingsRoot", "/home/user/games")
     val settingsAutoScan = remember("settingsAutoScan", true)
     val settingsShowRecent = remember("settingsShowRecent", true)
 
-    Scaffold(title = "ika", width = 1200, height = 800) {
+    Scaffold(title = "ika", width = 400, height = 600) {
         body {
             NavigationSplitView(
                 maxSidebarWidth = 240.0,
