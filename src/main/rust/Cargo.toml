@@ -8,12 +8,14 @@ crate-type = ["cdylib"]
 name = "gtk4kt_native"
 
 [dependencies]
-gtk = { package = "gtk4", version = "0.11" }
+# gtk3-rs has gtk_main() / gtk_main_quit() — gtk4-rs removed them
+gtk = { version = "0.18", features = ["v3_24"] }
 glib = { version = "0.22" }
 gio = { version = "0.22" }
-libadwaita = { package = "libadwaita", version = "0.9" }
 log = "0.4"
 env_logger = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [profile.release]
 panic = "abort"

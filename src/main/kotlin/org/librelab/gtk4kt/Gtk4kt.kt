@@ -3,248 +3,178 @@
 package org.librelab.gtk4kt
 
 import org.librelab.gtk4kt.internal.GTKNative
+import java.io.File
 
-// DSL marker
-@DslMarker
-annotation class GTK4KT
+/** Serializable description of a GTK widget (serialized to JSON for Rust UI builder). */
+data class WidgetNode(
+    val type: String,
+    val id: String? = null,
+    val label: String? = null,
+    val children: List<WidgetNode>? = null,
+    val onClick: Long? = null,
+    val spacing: Int? = null,
+    val orientation: Int? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val margin: Int? = null,
+)
 
-/**
- * A reference to a GTK widget, held as a raw pointer (Long).
- * The underlying GTK object is managed by GTK; this is just a handle.
- */
-@GTK4KT
-class Widget(val ptr: Long) {
-    init { require(ptr != GTKNative.NULL_PTR) { "null widget pointer" } }
+// ============================================================================
+// Callback registry
+// ============================================================================
+
+private val callbackMap = mutableMapOf<Long, () -> Unit>()
+private var nextCallbackId = 1L
+
+private fun registerCallback(fn: () -> Unit): Long {
+    val id = nextCallbackId++
+    callbackMap[id] = fn
+    System.err.println("[gtk4kt] callback registered: id=$id")
+    return id
 }
 
-/** A reference to a GTK Window. */
-@GTK4KT
-class WindowRef(val ptr: Long) {
-    init { require(ptr != GTKNative.NULL_PTR) { "null window pointer" } }
-}
-
-/** GTK4 orientation for boxes. */
-enum class Orientation {
-    Horizontal, Vertical
-}
-
-/** GTK4 text alignment. */
-enum class Align {
-    Start, Center, End, Fill
-}
-
-// ========================================================================
+// ============================================================================
 // Application DSL
-// ========================================================================
+// ============================================================================
 
-/**
- * Top-level application entry. Creates a GtkApplication and runs it.
- *
- * Usage:
- * ```
- * fun main() = application("org.example.App") {
- *     window("My App") {
- *         // ...
- *     }
- * }
- * ```
- */
+private var pendingJsonTree: List<WidgetNode>? = null
+
 fun application(appId: String, block: ApplicationScope.() -> Unit) {
     GTKNative.gtkInit()
     val app = GTKNative.gtkApplicationNew(appId)
     require(app != GTKNative.NULL_PTR) { "failed to create GTK application" }
 
-    // The block creates widgets INSIDE the activate callback
-    // We pass appPtr so window() can create GtkApplicationWindow with it
-    ApplicationScope(app).apply {
-        block()
-    }
+    val scope = ApplicationScope(app).apply(block)
 
-    // gtk_application_run blocks until quit; activate signal fires synchronously
+    // Write UI JSON to temp file (Rust activate handler reads it after startup signal)
+    val jsonTree = pendingJsonTree ?: emptyList()
+    val json = buildJson(jsonTree, scope.windowTitle, scope.windowWidth, scope.windowHeight)
+    val jsonFile = java.io.File.createTempFile("gtk4kt_ui_", ".json")
+    jsonFile.writeText(json)
+    System.err.println("[gtk4kt] UI JSON written to: ${jsonFile.absolutePath}")
+
+    // Register JSON path with Rust (activate handler reads it)
+    GTKNative.gtkSetUiJsonPath(jsonFile.absolutePath)
+
+    pendingJsonTree = null
+
+    // Start GTK — blocks on the JVM main thread (GTK requires gtk_main() on main thread)
     GTKNative.gtkApplicationRun(app)
+    System.err.println("[gtk4kt] application {}: GTK exited, JVM continues")
 }
 
-@GTK4KT
 class ApplicationScope(private val appPtr: Long) {
-    internal var currentWindow: WindowRef? = null
+    internal var windowTitle = "gtk4kt"
+    internal var windowWidth = 800
+    internal var windowHeight = 600
+    internal var windowContent: List<WidgetNode>? = null
 
-    /**
-     * Create a top-level window.
-     *
-     * Usage:
-     * ```
-     * window("Title", width = 800, height = 600) {
-     *     // child widgets
-     * }
-     * ```
-     */
     fun window(
-        title: String = "",
+        title: String = "gtk4kt",
         width: Int = 800,
         height: Int = 600,
-        block: WindowScope.() -> Unit
-    ): WindowRef {
-        val win = GTKNative.gtkWindowNew(appPtr)
-        require(win != GTKNative.NULL_PTR) { "failed to create window" }
-        GTKNative.gtkWindowSetTitle(win, title)
-        GTKNative.gtkWindowSetDefaultSize(win, width, height)
-
-        val ws = WindowScope(win)
-        ws.block()
-
-        currentWindow = WindowRef(win)
-        GTKNative.gtkWindowPresent(win)
-        return currentWindow!!
+        block: WindowBuilder.() -> Unit
+    ) {
+        windowTitle = title
+        windowWidth = width
+        windowHeight = height
+        val wb = WindowBuilder()
+        wb.block()
+        windowContent = wb.children
+        pendingJsonTree = windowContent
     }
 }
 
-// ========================================================================
-// Window DSL
-// ========================================================================
+class WindowBuilder {
+    internal val children = mutableListOf<WidgetNode>()
 
-@GTK4KT
-class WindowScope(private val windowPtr: Long) {
-    private val contentBox: Long = GTKNative.gtkBoxNew(GTKNative.ORIENTATION_VERTICAL, 0)
-
-    init {
-        GTKNative.gtkWidgetShow(contentBox)
+    fun label(text: String) {
+        children.add(WidgetNode("Label", label = text))
     }
 
-    /**
-     * Set the child widget of this window.
-     * Replaces any previously set child.
-     */
-    fun child(widget: Widget) {
-        GTKNative.gtkWidgetShow(widget.ptr)
-        GTKNative.gtkWindowSetChild(windowPtr, widget.ptr)
+    fun button(label: String, onClick: (() -> Unit)? = null) {
+        val handleId = onClick?.let { registerCallback(it) } ?: 0L
+        children.add(WidgetNode("Button", label = label, onClick = handleId.takeIf { it != 0L }))
     }
 
-    /**
-     * Add a widget to the window content area.
-     * The window uses a vertical box internally.
-     */
-    fun add(widget: Widget) {
-        GTKNative.gtkBoxAppend(contentBox, widget.ptr)
+    fun column(spacing: Int = 0, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        children.add(WidgetNode("Box", orientation = 1, spacing = spacing, children = b.children.toList()))
+    }
+
+    fun row(spacing: Int = 0, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        children.add(WidgetNode("Box", orientation = 0, spacing = spacing, children = b.children.toList()))
     }
 }
 
-// ========================================================================
-// Factory functions for widgets
-// ========================================================================
+class BoxBuilder {
+    internal val children = mutableListOf<WidgetNode>()
 
-/**
- * Create a Label widget.
- *
- * Usage:
- * ```
- * label("Hello, world!")
- * ```
- */
-fun label(text: String): Widget {
-    val ptr = GTKNative.gtkLabelNew(text)
-    require(ptr != GTKNative.NULL_PTR) { "failed to create label" }
-    return Widget(ptr).also { GTKNative.gtkWidgetShow(it.ptr) }
-}
+    fun label(text: String) {
+        children.add(WidgetNode("Label", label = text))
+    }
 
-/**
- * Create a Button widget with an optional click handler.
- *
- * Usage:
- * ```
- * button("Click me!") {
- *     count.value = count.value + 1
- * }
- * ```
- */
-fun button(label: String, onClicked: () -> Unit = {}): Widget {
-    val ptr = GTKNative.gtkButtonNewWithLabel(label)
-    require(ptr != GTKNative.NULL_PTR) { "failed to create button" }
-    // TODO: wire up onClicked via Panama callback (Phase 2 onClick implementation)
-    return Widget(ptr).also { GTKNative.gtkWidgetShow(it.ptr) }
-}
+    fun button(label: String, onClick: (() -> Unit)? = null) {
+        val handleId = onClick?.let { registerCallback(it) } ?: 0L
+        children.add(WidgetNode("Button", label = label, onClick = handleId.takeIf { it != 0L }))
+    }
 
-/**
- * Create a Box container with vertical orientation.
- *
- * Usage:
- * ```
- * column(spacing = 8) {
- *     label("First")
- *     label("Second")
- * }
- * ```
- */
-fun column(spacing: Int = 0, block: BoxScope.() -> Unit): Widget {
-    val ptr = GTKNative.gtkBoxNew(GTKNative.ORIENTATION_VERTICAL, spacing)
-    require(ptr != GTKNative.NULL_PTR) { "failed to create column box" }
-    val box = BoxScope(ptr)
-    box.block()
-    return Widget(ptr).also { GTKNative.gtkWidgetShow(it.ptr) }
-}
+    fun column(spacing: Int = 0, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        children.add(WidgetNode("Box", orientation = 1, spacing = spacing, children = b.children.toList()))
+    }
 
-/**
- * Create a Box container with horizontal orientation.
- *
- * Usage:
- * ```
- * row(spacing = 4) {
- *     button("OK")
- *     button("Cancel")
- * }
- * ```
- */
-fun row(spacing: Int = 0, block: BoxScope.() -> Unit): Widget {
-    val ptr = GTKNative.gtkBoxNew(GTKNative.ORIENTATION_HORIZONTAL, spacing)
-    require(ptr != GTKNative.NULL_PTR) { "failed to create row box" }
-    val box = BoxScope(ptr)
-    box.block()
-    return Widget(ptr).also { GTKNative.gtkWidgetShow(it.ptr) }
-}
-
-@GTK4KT
-class BoxScope(private val boxPtr: Long) {
-    fun add(widget: Widget) {
-        GTKNative.gtkBoxAppend(boxPtr, widget.ptr)
+    fun row(spacing: Int = 0, block: BoxBuilder.() -> Unit) {
+        val b = BoxBuilder()
+        b.block()
+        children.add(WidgetNode("Box", orientation = 0, spacing = spacing, children = b.children.toList()))
     }
 }
 
-/**
- * Apply modifier to a widget (currently a no-op stub).
- *
- * Usage:
- * ```
- * label("Hello").modifier(Modifier.padding(16).fillWidth())
- * ```
- */
-fun Widget.modifier(block: Modifier.() -> Unit): Widget {
-    val m = Modifier()
-    m.block()
-    // TODO: apply modifier properties to GTK widget
-    return this
+// ============================================================================
+// JSON serialization
+// ============================================================================
+
+private fun buildJson(nodes: List<WidgetNode>, title: String, width: Int, height: Int): String {
+    val sb = StringBuilder()
+    // Top-level: Window containing Box with all children
+    sb.append("{\"type\":\"Window\",\"label\":\"${escJson(title)}\",\"width\":$width,\"height\":$height,\"children\":[")
+    nodes.forEachIndexed { i, n ->
+        if (i > 0) sb.append(",")
+        appendNode(sb, n)
+    }
+    sb.append("]}")
+    return sb.toString()
 }
 
-/**
- * Modifier for widget styling and layout.
- */
-class Modifier {
-    private var margin: Int = 0
-    private var padding: Int = 0
-
-    fun padding(all: Int) {
-        padding = all
-    }
-
-    fun fillWidth() {
-        // TODO: map to GTK size request / expand flags
-    }
-
-    fun fillHeight() {
-        // TODO
-    }
-
-    internal fun applyTo(ptr: Long) {
-        if (padding > 0) {
-            GTKNative.gtkWidgetSetMargin(ptr, padding)
+private fun appendNode(sb: StringBuilder, node: WidgetNode) {
+    sb.append("{\"type\":\"${node.type}\"")
+    node.id?.let { sb.append(",\"id\":\"$it\"") }
+    node.label?.let { sb.append(",\"label\":\"${escJson(it)}\"") }
+    node.onClick?.let { sb.append(",\"on_click\":$it") }
+    node.spacing?.let { sb.append(",\"spacing\":$it") }
+    node.orientation?.let { sb.append(",\"orientation\":$it") }
+    node.width?.let { sb.append(",\"width\":$it") }
+    node.height?.let { sb.append(",\"height\":$it") }
+    node.margin?.let { sb.append(",\"margin\":$it") }
+    if (!node.children.isNullOrEmpty()) {
+        sb.append(",\"children\":[")
+        node.children.forEachIndexed { i, c ->
+            if (i > 0) sb.append(",")
+            appendNode(sb, c)
         }
+        sb.append("]")
     }
+    sb.append("}")
 }
+
+private fun escJson(s: String): String = s
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+    .replace("\n", "\\n")
+    .replace("\r", "\\r")
+    .replace("\t", "\\t")

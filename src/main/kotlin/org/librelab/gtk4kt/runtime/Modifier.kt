@@ -107,10 +107,10 @@ class Modifier private constructor(
 
         // Expansion
         if (hexpand) {
-            GTKNative.gtkWidgetSetHexpand(ptr, 1)
+            GTKNative.gtkWidgetSetHexpand(ptr, hexpand)
         }
         if (vexpand) {
-            GTKNative.gtkWidgetSetVexpand(ptr, 1)
+            GTKNative.gtkWidgetSetVexpand(ptr, vexpand)
         }
 
         // Alignment (only valid for box children — apply to box)

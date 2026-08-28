@@ -4,35 +4,36 @@ import org.librelab.gtk4kt.*
 import org.librelab.gtk4kt.runtime.*
 
 /**
- * Example demonstrating gtk4kt's declarative UI with state and callbacks.
+ * Example: gtk4kt declarative UI with state + callbacks.
  *
- * Shows: @Composable, MutableState, remember{}, onClick
+ * Shows: WidgetNode tree → JSON → Rust activate handler → GTK widgets
+ *        Kotlin onClick callbacks invoked by Rust via MethodHandle
  */
 fun main() {
     application("org.gtk4kt.example") {
-        window("gtk4kt Counter", width = 320, height = 200) {
+        window("gtk4kt Counter", width = 320, height = 240) {
             CounterApp()
         }
     }
 }
 
 /**
- * A composable counter app.
- * State changes trigger recomposition — the label text updates automatically.
+ * A composable counter app — an extension on WindowBuilder
+ * so all DSL functions (column, label, button) are in scope.
  */
-@Composable
-fun CounterApp() {
-    val count: MutableState<Int> = remember { mutableStateOf(0) }
-
+fun WindowBuilder.CounterApp() {
+    // Note: state tracking via WidgetNode tree is static (no reactive recomposition yet).
+    // Each state update requires rebuilding the tree. Phase 4 adds reactive recomposition.
     column(spacing = 16) {
-        label("Count: $count")
+        label("Count: 0")
 
         button("Click me!") {
-            count.update { it + 1 }
+            // Callback invoked by Rust when button is clicked
+            System.err.println("[CounterApp] button clicked!")
         }
 
         button("Reset") {
-            count.update { 0 }
+            System.err.println("[CounterApp] reset clicked!")
         }
     }
 }
