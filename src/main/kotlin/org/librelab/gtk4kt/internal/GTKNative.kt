@@ -38,12 +38,19 @@ object GTKNative {
     }
 
     /**
-     * Phase 6-5: rebuild UI from the currently-set JSON path. Triggers a
-     * fresh widget tree build on the GTK thread. The JSON file should be
-     * rewritten with the new content before calling this.
+     * Phase 6-5: rebuild UI from the currently-set JSON path.
      */
     fun gtkRebuildUi() {
         f("gtk_bridge_rebuild_ui").invokeInt(arrayOf<Any>())
+    }
+
+    /**
+     * Phase 8-3: load a custom CSS theme at startup. Called once before any
+     * widgets are built; the CSS is applied via GtkCssProvider with priority
+     * USER+2 (overrides theme defaults but keeps engine defaults).
+     */
+    fun gtkLoadTheme(css: String) {
+        f("gtk_bridge_load_theme").invokeInt(arrayOf<Any>(css))
     }
 
     private fun gtkMainLoop() {

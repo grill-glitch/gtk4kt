@@ -81,6 +81,8 @@ pub struct WidgetNode {
     #[serde(default)] pub alignmentCrossAxis: Option<i32>,
     // ─── Phase 7 desktop-first fields ─────────────────────────────────────
     #[serde(default)] pub tag: Option<String>,
+    // Phase 8: style classes from design tokens.
+    #[serde(default)] pub classes: Vec<String>,
     #[serde(default)] pub description: Option<String>,
     #[serde(default)] pub collapsed: Option<bool>,
     #[serde(default)] pub maxSidebarWidth: Option<f64>,
@@ -99,6 +101,14 @@ fn next_key() -> u64 {
     use std::sync::atomic::AtomicU64;
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Phase 8: apply CSS style classes from the JSON `classes` array.
+fn apply_classes<W: gtk::glib::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
+    let ctx = w.style_context();
+    for c in &node.classes {
+        ctx.add_class(c);
+    }
 }
 
 fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
@@ -1031,12 +1041,284 @@ fn apply_modifier<W: gtk::glib::IsA<gtk::Widget>>(w: &W, node: &WidgetNode) {
             w.set_size_request(natural_w, (natural_w as f32 / r) as i32);
         }
     }
+    apply_classes(w, node);
 }
 
 // ─── Phase 6-5: rebuild hook (Recomposer) ──────────────────────────────────
 
 /// Phase 6-5: rebuild the widget tree from the current JSON path.
 /// Used by the Recomposer to refresh the UI after a state change.
+/// Phase 8-3: load the design-system CSS. Called once at startup.
+/// Loads the full theme + per-component class styles defined in
+/// gtk_bridge_load_theme_default.
+#[no_mangle]
+pub extern "C" fn gtk_bridge_load_theme(css_ptr: *const std::ffi::c_char) -> i32 {
+    if css_ptr.is_null() {
+        eprintln!("[gtk4kt] load_theme: null css");
+        return -1;
+    }
+    let css = unsafe { std::ffi::CStr::from_ptr(css_ptr).to_string_lossy().into_owned() };
+    let provider = gtk::CssProvider::new();
+    if let Err(e) = provider.load_from_data(css.as_bytes()) {
+        eprintln!("[gtk4kt] load_theme: parse error: {:?}", e);
+        return -2;
+    }
+    if let Some(screen) = gtk::gdk::Screen::default() {
+        gtk::StyleContext::add_provider_for_screen(
+            &screen,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_USER + 1,
+        );
+    }
+    eprintln!("[gtk4kt] load_theme: applied ({} bytes)", css.len());
+    0
+}
+
+/// Default theme = the gtk4kt design tokens (Phase 8).
+/// Spacing tokens are not native CSS, but colors/sizes/classes are.
+const DEFAULT_THEME_CSS: &str = r#"
+/* === gtk4kt design tokens — Phase 8 =============================== */
+/* Surfaces: transparent panels (no gray slabs). Background comes from
+   the screen's default `bg-color` which we tint with @theme_bg_color. */
+
+window,
+window > box {
+    background: @theme_bg_color;
+}
+
+/* HeaderBar: flat, no shadow. */
+headerbar {
+    background: @theme_bg_color;
+    border-bottom: 1px solid alpha(@theme_fg_color, 0.08);
+    min-height: 44px;
+    padding: 0 8px;
+}
+headerbar button {
+    margin: 4px 2px;
+    padding: 6px 10px;
+    border-radius: 6px;
+}
+
+/* Sidebar: transparent (no gray slab). Items: flat row with accent
+   selection pill, not a full-width bar. */
+.sidebar,
+.sidebar list,
+.sidebar list > row {
+    background: transparent;
+    border: none;
+}
+.sidebar list > row {
+    padding: 6px 10px;
+    border-radius: 6px;
+    margin: 2px 8px;
+    color: alpha(@theme_fg_color, 0.85);
+}
+.sidebar list > row:hover {
+    background: alpha(@theme_fg_color, 0.06);
+}
+.sidebar list > row:selected,
+.sidebar list > row.sidebar-selected {
+    background: alpha(#3584e4, 0.14);
+    color: #3584e4;
+    font-weight: 500;
+}
+
+/* Sidebar header (title). */
+.sidebar-header {
+    font-size: 13px;
+    font-weight: 500;
+    color: alpha(@theme_fg_color, 0.55);
+    padding: 18px 16px 6px 16px;
+    letter-spacing: 0.4px;
+}
+
+/* ─── Content list ───────────────────────────────────────────────── */
+/* Plain GtkListBox with our own row layout. No blue default
+   selection bar — we use subtle accent. */
+.content-list {
+    background: @theme_bg_color;
+    border: none;
+}
+.content-list > row {
+    padding: 12px 20px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: @theme_fg_color;
+}
+.content-list > row:hover {
+    background: alpha(@theme_fg_color, 0.04);
+}
+.content-list > row:selected {
+    background: alpha(#3584e4, 0.10);
+}
+
+/* Row layout: 3 levels — title (primary), subtitle (secondary),
+   metadata (dim). Set as classes on Labels. */
+.text-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: @theme_fg_color;
+}
+.text-subtitle {
+    font-size: 12px;
+    color: alpha(@theme_fg_color, 0.65);
+}
+.text-metadata {
+    font-size: 11px;
+    color: alpha(@theme_fg_color, 0.45);
+}
+
+/* Game cover thumbnail — 48px square, rounded. */
+.thumb {
+    background: alpha(@theme_fg_color, 0.05);
+    border-radius: 9px;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 12px;
+    color: alpha(@theme_fg_color, 0.45);
+}
+
+/* Page title (large heading at top of content). */
+.page-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: @theme_fg_color;
+    margin: 0;
+    padding: 0;
+}
+.page-subtitle {
+    font-size: 13px;
+    color: alpha(@theme_fg_color, 0.6);
+    margin: 0;
+    padding: 4px 0 0 0;
+}
+
+/* Section title (small caps above groups). */
+.section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: alpha(@theme_fg_color, 0.5);
+    letter-spacing: 0.6px;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    padding: 0 20px;
+}
+
+/* ActionRow style — settings rows. */
+.action-row {
+    background: transparent;
+    padding: 14px 20px;
+    border: none;
+    border-bottom: 1px solid alpha(@theme_fg_color, 0.06);
+}
+.action-row:last-child {
+    border-bottom: none;
+}
+.action-row:hover {
+    background: alpha(@theme_fg_color, 0.04);
+}
+.action-row .action-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: @theme_fg_color;
+}
+.action-row .action-description {
+    font-size: 12px;
+    color: alpha(@theme_fg_color, 0.6);
+    margin-top: 2px;
+}
+
+/* Group separator (between PreferencesGroup blocks). */
+.group-separator {
+    background: alpha(@theme_fg_color, 0.06);
+    min-height: 1px;
+    border: none;
+}
+
+/* StatusPage (empty states) — soft centered. */
+.status-page {
+    background: @theme_bg_color;
+    color: alpha(@theme_fg_color, 0.6);
+    font-size: 14px;
+}
+.status-page-icon {
+    color: alpha(@theme_fg_color, 0.25);
+    font-size: 64px;
+}
+.status-page-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: @theme_fg_color;
+}
+
+/* Buttons: flat-ish with subtle hover. */
+button.flat {
+    background: transparent;
+    border: 1px solid alpha(@theme_fg_color, 0.12);
+    border-radius: 6px;
+    padding: 7px 14px;
+    color: @theme_fg_color;
+}
+button.flat:hover {
+    background: alpha(@theme_fg_color, 0.05);
+}
+button.suggested-action {
+    background: #3584e4;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    color: white;
+    font-weight: 500;
+}
+button.suggested-action:hover {
+    background: #2d76d8;
+}
+
+/* Switch: leave GTK default but smaller track. */
+switch {
+    margin: 4px;
+}
+
+/* Search entry (Phase 8 top-bar search). */
+.search-entry {
+    background: alpha(@theme_fg_color, 0.05);
+    border: 1px solid alpha(@theme_fg_color, 0.08);
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-width: 240px;
+    margin: 4px 8px;
+    color: @theme_fg_color;
+}
+.search-entry:focus {
+    border-color: #3584e4;
+    background: white;
+}
+
+/* Hide default separator lines from ListBoxRow (we draw our own). */
+list row {
+    border: none;
+}
+"#;
+
+/// Apply the default theme. Called once at startup from
+/// gtk_bridge_application_run. Phase 8-3.
+fn apply_default_theme() {
+    let provider = gtk::CssProvider::new();
+    if let Err(e) = provider.load_from_data(DEFAULT_THEME_CSS.as_bytes()) {
+        eprintln!("[gtk4kt] default theme parse error: {:?}", e);
+        return;
+    }
+    if let Some(screen) = gtk::gdk::Screen::default() {
+        gtk::StyleContext::add_provider_for_screen(
+            &screen,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_USER + 2,
+        );
+    }
+    eprintln!("[gtk4kt] default theme applied ({} bytes)", DEFAULT_THEME_CSS.len());
+}
+
 /// Currently a no-op stub — proper rebuild is wired up in Phase 6-5 itself
 /// once the JSON re-write is verified.
 #[no_mangle]
@@ -1243,6 +1525,7 @@ pub extern "C" fn gtk_bridge_application_run(_app_ptr: u64, _latch_addr: u64) ->
                     Ok(root) => {
                         eprintln!("[gtk4kt] building UI...");
                         let _ = build_widget(&root);
+                        apply_default_theme();
                         // Phase 6 preview: save an offscreen screenshot of the
                         // window (only when GTK4KT_SCREENSHOT env is set).
                         if std::env::var("GTK4KT_SCREENSHOT").is_ok() {

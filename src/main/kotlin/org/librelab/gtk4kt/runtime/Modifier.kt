@@ -79,7 +79,7 @@ object Colors {
  * Property names intentionally match Compose: padding, size, width, height,
  * fillMaxWidth, fillMaxHeight, weight, alignCenterHorizontally, margin.
  */
-class Modifier private constructor(
+class Modifier(
     private val paddingStart: Int = 0,
     private val paddingEnd: Int = 0,
     private val paddingTop: Int = 0,
@@ -99,7 +99,21 @@ class Modifier private constructor(
     private val hWeight: Float = 0f,        // horizontal weight (Row's column weight)
     private val vWeight: Float = 0f,        // vertical weight (Column's row weight)
     private val alignmentCrossAxis: Int = -1,  // Alignment.CenterVertically for Row; Horizontal for Column
+    private val cssClasses: List<String> = emptyList(),  // Phase 8: design-token CSS classes
 ) {
+    /** Phase 8: replace the modifier's CSS classes (internal). */
+    @Suppress("LongParameterList")
+    fun copyClasses(c: List<String>): Modifier = Modifier(
+        paddingStart, paddingEnd, paddingTop, paddingBottom,
+        width, height, fillMaxWidth, fillMaxHeight, halign, valign,
+        weight, margin, bgColor, aspectRatio, verticalScroll,
+        hWeight, vWeight, alignmentCrossAxis, c,
+    )
+
+    /** Phase 8: read-only access to CSS classes (used by widget builders). */
+    fun cssClassesList(): List<String> = cssClasses
+
+
     companion object {
         /** Default empty modifier — no styling. */
         val Empty = Modifier()
@@ -108,6 +122,9 @@ class Modifier private constructor(
 
         /** Apply uniform padding to all sides. */
         fun padding(all: Int): Modifier = Modifier().copy(paddingStart = all, paddingEnd = all, paddingTop = all, paddingBottom = all)
+
+        /** Phase 8: build a Modifier from CSS class names. */
+        fun classes(vararg cssClass: String): Modifier = Modifier().copyClasses(cssClass.toList())
 
         /** Apply horizontal padding (start + end). */
         fun paddingHorizontal(horizontal: Int): Modifier = Modifier().copy(paddingStart = horizontal, paddingEnd = horizontal)
@@ -182,6 +199,10 @@ class Modifier private constructor(
 
     /** Compose-like `padding(all: Int)`. */
     fun padding(all: Int): Modifier = copy(paddingStart = all, paddingEnd = all, paddingTop = all, paddingBottom = all)
+
+    /** Phase 8: add more CSS classes to this Modifier (chainable). */
+    fun classes(vararg cssClass: String): Modifier =
+        copyClasses(cssClasses + cssClass.toList())
 
     /** Compose-like `padding(horizontal: Int, vertical: Int)`. */
     fun padding(horizontal: Int, vertical: Int): Modifier = copy(

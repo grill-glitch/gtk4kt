@@ -33,6 +33,8 @@ data class WidgetNode(
     val collapsed: Boolean? = null,
     val maxSidebarWidth: Double? = null,
     val columns: Int? = null,
+    // Phase 8: style classes for the design-token CSS
+    val classes: List<String> = emptyList(),
     val text: String? = null,
     /**
      * Optional Modifier (Compose-style) for this widget. Stored as raw JSON
@@ -180,7 +182,7 @@ class WindowBuilder {
         val b = BoxBuilder()
         b.block()
         children.add(
-            WidgetNode("Box", orientation = 1, spacing = spacing, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Box", orientation = 1, spacing = spacing, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = b.children.toList())
         )
     }
@@ -189,7 +191,7 @@ class WindowBuilder {
         val b = BoxBuilder()
         b.block()
         children.add(
-            WidgetNode("Box", orientation = 0, spacing = spacing, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Box", orientation = 0, spacing = spacing, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = b.children.toList())
         )
     }
@@ -210,7 +212,7 @@ class WindowBuilder {
             child.copy(modifierJson = child.modifierJson + ",\"halign\":3,\"valign\":3")
         }
         children.add(
-            WidgetNode("Box", orientation = 1, spacing = 0, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Box", orientation = 1, spacing = 0, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = stacked)
         )
     }
@@ -251,7 +253,7 @@ class BoxBuilder {
      */
     fun Text(text: String, modifier: Modifier = Modifier.Empty, id: String? = null) {
         children.add(
-            WidgetNode("Label", label = text, id = id, modifierJson = modifier.toJsonFields())
+            WidgetNode("Label", label = text, id = id, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList())
         )
     }
 
@@ -284,7 +286,7 @@ class BoxBuilder {
     ) {
         val handleId = onClick?.let { registerCallback(it) } ?: 0L
         children.add(
-            WidgetNode("Button", label = label, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Button", label = label, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onClick = handleId.takeIf { it != 0L })
         )
     }
@@ -302,7 +304,7 @@ class BoxBuilder {
     ) {
         val handleId = onClick?.let { registerCallback(it) } ?: 0L
         children.add(
-            WidgetNode("OutlinedButton", label = label, modifierJson = modifier.toJsonFields(),
+            WidgetNode("OutlinedButton", label = label, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onClick = handleId.takeIf { it != 0L })
         )
     }
@@ -315,7 +317,7 @@ class BoxBuilder {
         val b = BoxBuilder()
         b.block()
         children.add(
-            WidgetNode("Card", modifierJson = modifier.toJsonFields(), children = b.children.toList())
+            WidgetNode("Card", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(), children = b.children.toList())
         )
     }
 
@@ -334,7 +336,7 @@ class BoxBuilder {
         val b = BoxBuilder()
         b.block()
         children.add(
-            WidgetNode("ClickableCard", modifierJson = modifier.toJsonFields(),
+            WidgetNode("ClickableCard", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onClick = handleId.takeIf { it != 0L },
                 children = b.children.toList())
         )
@@ -347,7 +349,7 @@ class BoxBuilder {
         val b = BoxBuilder()
         b.block()
         children.add(
-            WidgetNode("Surface", modifierJson = modifier.toJsonFields(), children = b.children.toList())
+            WidgetNode("Surface", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(), children = b.children.toList())
         )
     }
 
@@ -358,7 +360,7 @@ class BoxBuilder {
      */
     fun Divider(modifier: Modifier = Modifier.Empty, vertical: Boolean = false) {
         children.add(
-            WidgetNode("Divider", orientation = if (vertical) 0 else 1, modifierJson = modifier.toJsonFields())
+            WidgetNode("Divider", orientation = if (vertical) 0 else 1, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList())
         )
     }
 
@@ -374,7 +376,7 @@ class BoxBuilder {
     ) {
         val handleId = onCheckedChange?.let { registerValueCallback { v -> onCheckedChange(v != 0L) } } ?: 0L
         children.add(
-            WidgetNode("Switch", active = checked, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Switch", active = checked, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onChange = handleId.takeIf { it != 0L })
         )
     }
@@ -398,7 +400,7 @@ class BoxBuilder {
     ) {
         val handleId = onValueChange?.let { registerValueCallback { v -> onValueChange(v.toFloat()) } } ?: 0L
         children.add(
-            WidgetNode("Slider", modifierJson = modifier.toJsonFields(),
+            WidgetNode("Slider", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onChange = handleId.takeIf { it != 0L },
                 min = min.toDouble(), max = max.toDouble(), value = value.toDouble())
         )
@@ -421,7 +423,7 @@ class BoxBuilder {
         fallbackIcon: String = "image-missing",
         modifier: Modifier = Modifier.Empty,
     ) {
-        children.add(WidgetNode("Image", icon = path ?: fallbackIcon, modifierJson = modifier.toJsonFields()))
+        children.add(WidgetNode("Image", icon = path ?: fallbackIcon, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList()))
     }
 
     fun image(
@@ -435,7 +437,7 @@ class BoxBuilder {
      * Phase 5a: rendered as a gtk::Spinner (the closest GTK analog).
      */
     fun CircularProgressIndicator(modifier: Modifier = Modifier.Empty) {
-        children.add(WidgetNode("Spinner", modifierJson = modifier.toJsonFields()))
+        children.add(WidgetNode("Spinner", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList()))
     }
 
     fun circularProgressIndicator(modifier: Modifier = Modifier.Empty) = CircularProgressIndicator(modifier)
@@ -449,7 +451,7 @@ class BoxBuilder {
         val b = BoxBuilder()
         b.block()
         children.add(
-            WidgetNode("ElevatedCard", modifierJson = modifier.toJsonFields(),
+            WidgetNode("ElevatedCard", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = b.children.toList())
         )
     }
@@ -469,7 +471,7 @@ class BoxBuilder {
         val b = BoxBuilder()
         b.block()
         children.add(
-            WidgetNode("ClickableElevatedCard", modifierJson = modifier.toJsonFields(),
+            WidgetNode("ClickableElevatedCard", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onClick = handleId.takeIf { it != 0L },
                 children = b.children.toList())
         )
@@ -486,7 +488,7 @@ class BoxBuilder {
     ) {
         val handleId = onClick?.let { registerCallback(it) } ?: 0L
         children.add(
-            WidgetNode("TextButton", label = label, modifierJson = modifier.toJsonFields(),
+            WidgetNode("TextButton", label = label, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onClick = handleId.takeIf { it != 0L })
         )
     }
@@ -517,7 +519,7 @@ class BoxBuilder {
         children.add(
             WidgetNode(
                 type = "NavigationSplitView",
-                modifierJson = modifier.toJsonFields(),
+                modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 maxSidebarWidth = maxSidebarWidth,
                 collapsed = collapsed,
                 children = listOf(
@@ -532,7 +534,7 @@ class BoxBuilder {
     /** Sidebar (within NavigationSplitView sidebar slot). */
     fun Sidebar(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
         val b = BoxBuilder(); b.block()
-        children.add(WidgetNode(type = "Sidebar", modifierJson = modifier.toJsonFields(), children = b.children.toList()))
+        children.add(WidgetNode(type = "Sidebar", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(), children = b.children.toList()))
     }
 
     /** NavigationPage — sidebar list item. */
@@ -557,7 +559,7 @@ class BoxBuilder {
     /** PreferencesPage — flat group layout for settings. */
     fun PreferencesPage(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
         val b = BoxBuilder(); b.block()
-        children.add(WidgetNode(type = "PreferencesPage", modifierJson = modifier.toJsonFields(), children = b.children.toList()))
+        children.add(WidgetNode(type = "PreferencesPage", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(), children = b.children.toList()))
     }
 
     /** PreferencesGroup — labeled section within a PreferencesPage. */
@@ -599,7 +601,7 @@ class BoxBuilder {
     /** ListBox — flat list container. */
     fun ListBox(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
         val b = BoxBuilder(); b.block()
-        children.add(WidgetNode(type = "ListBox", modifierJson = modifier.toJsonFields(), children = b.children.toList()))
+        children.add(WidgetNode(type = "ListBox", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(), children = b.children.toList()))
     }
 
     /** ListBoxRow — single row in a ListBox. Optional onClick makes it activatable. */
@@ -613,7 +615,7 @@ class BoxBuilder {
         children.add(
             WidgetNode(
                 type = "ListBoxRow",
-                modifierJson = modifier.toJsonFields(),
+                modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onClick = handleId.takeIf { it != 0L },
                 children = b.children.toList(),
             ),
@@ -627,7 +629,7 @@ class BoxBuilder {
             WidgetNode(
                 type = "GridView",
                 columns = columns,
-                modifierJson = modifier.toJsonFields(),
+                modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = b.children.toList(),
             ),
         )
@@ -649,7 +651,7 @@ class BoxBuilder {
                 icon = icon,
                 title = title,
                 description = description,
-                modifierJson = modifier.toJsonFields(),
+                modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = b.children.toList(),
             ),
         )
@@ -662,7 +664,7 @@ class BoxBuilder {
                 type = "Toast",
                 title = message,
                 value = timeoutMs.toDouble(),
-                modifierJson = modifier.toJsonFields(),
+                modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
             ),
         )
     }
@@ -674,7 +676,7 @@ class BoxBuilder {
             WidgetNode(
                 type = "HeaderBar",
                 title = title,
-                modifierJson = modifier.toJsonFields(),
+                modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = b.children.toList(),
             ),
         )
@@ -687,7 +689,7 @@ class BoxBuilder {
     ) {
         val handleId = onClick?.let { registerCallback(it) } ?: 0L
         children.add(
-            WidgetNode("FloatingActionButton", label = content, modifierJson = modifier.toJsonFields(),
+            WidgetNode("FloatingActionButton", label = content, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onClick = handleId.takeIf { it != 0L })
         )
     }
@@ -715,7 +717,7 @@ class BoxBuilder {
         // Flatten to Box children. Real virtualization deferred to Phase 5b.
         val rendered = scope.items.map { it.render() }
         children.add(
-            WidgetNode("Box", orientation = 1, spacing = 4, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Box", orientation = 1, spacing = 4, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = rendered)
         )
     }
@@ -736,7 +738,7 @@ class BoxBuilder {
         scope.block()
         val rendered = scope.items.map { it.render() }
         children.add(
-            WidgetNode("Box", orientation = 0, spacing = 4, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Box", orientation = 0, spacing = 4, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = rendered)
         )
     }
@@ -751,7 +753,7 @@ class BoxBuilder {
      * Maps to gtk::Image::from_icon_name.
      */
     fun Icon(icon: String, modifier: Modifier = Modifier.Empty) {
-        children.add(WidgetNode("Icon", icon = icon, modifierJson = modifier.toJsonFields()))
+        children.add(WidgetNode("Icon", icon = icon, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList()))
     }
 
     fun icon(icon: String, modifier: Modifier = Modifier.Empty) = Icon(icon, modifier)
@@ -767,7 +769,7 @@ class BoxBuilder {
     ) {
         val handleId = onClick?.let { registerCallback(it) } ?: 0L
         children.add(
-            WidgetNode("IconButton", icon = icon, modifierJson = modifier.toJsonFields(),
+            WidgetNode("IconButton", icon = icon, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onClick = handleId.takeIf { it != 0L })
         )
     }
@@ -791,7 +793,7 @@ class BoxBuilder {
         val handleId = onValueChange?.let { registerValueCallback { _ -> /* text retrieval in Phase 5 */ } } ?: 0L
         children.add(
             WidgetNode("OutlinedTextField", text = value, placeholder = placeholder,
-                modifierJson = modifier.toJsonFields(),
+                modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 onChange = handleId.takeIf { it != 0L })
         )
     }
@@ -822,7 +824,7 @@ class BoxBuilder {
         val mb = DropdownMenuBuilder()
         mb.block()
         children.add(
-            WidgetNode("DropdownMenu", label = label, modifierJson = modifier.toJsonFields(),
+            WidgetNode("DropdownMenu", label = label, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = mb.items.map { it.toWidgetNode() })
         )
     }
@@ -841,7 +843,7 @@ class BoxBuilder {
      * Maps to a GTK Box of the requested orientation with a fixed child size.
      */
     fun Spacer(modifier: Modifier = Modifier.Empty) {
-        children.add(WidgetNode("Spacer", modifierJson = modifier.toJsonFields()))
+        children.add(WidgetNode("Spacer", modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList()))
     }
 
     fun spacer(modifier: Modifier = Modifier.Empty) = Spacer(modifier)
@@ -850,7 +852,7 @@ class BoxBuilder {
         val b = BoxBuilder()
         b.block()
         children.add(
-            WidgetNode("Box", orientation = 1, spacing = spacing, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Box", orientation = 1, spacing = spacing, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = b.children.toList())
         )
     }
@@ -859,7 +861,7 @@ class BoxBuilder {
         val b = BoxBuilder()
         b.block()
         children.add(
-            WidgetNode("Box", orientation = 0, spacing = spacing, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Box", orientation = 0, spacing = spacing, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = b.children.toList())
         )
     }
@@ -875,7 +877,7 @@ class BoxBuilder {
             child.copy(modifierJson = child.modifierJson + ",\"halign\":3,\"valign\":3")
         }
         children.add(
-            WidgetNode("Box", orientation = 1, spacing = 0, modifierJson = modifier.toJsonFields(),
+            WidgetNode("Box", orientation = 1, spacing = 0, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
                 children = stacked)
         )
     }
@@ -1111,7 +1113,7 @@ fun AlertDialog(
         add(buttonRow)
     }
     val dialog = WidgetNode(
-        type = "AlertDialog", title = title, modifierJson = modifier.toJsonFields(),
+        type = "AlertDialog", title = title, modifierJson = modifier.toJsonFields(), classes = modifier.cssClassesList(),
         children = children,
     )
     pendingJsonTree = listOf(dialog)
@@ -1301,6 +1303,18 @@ private fun appendNode(sb: StringBuilder, node: WidgetNode) {
     // Phase 4d: icon / placeholder / text
     node.icon?.let { sb.append(",\"icon\":\"${escJson(it)}\"") }
     node.placeholder?.let { sb.append(",\"placeholder\":\"${escJson(it)}\"") }
+    // Phase 8: design-token CSS classes
+    if (node.classes.isNotEmpty()) {
+        sb.append(",\"classes\":[")
+        node.classes.forEachIndexed { i, c -> if (i > 0) sb.append(","); sb.append("\"").append(escJson(c)).append("\"") }
+        sb.append("]")
+    }
+    // Phase 7: navigation / preference fields
+    node.tag?.let { sb.append(",\"tag\":\"$it\"") }
+    node.description?.let { sb.append(",\"description\":\"${escJson(it)}\"") }
+    node.collapsed?.let { sb.append(",\"collapsed\":$it") }
+    node.maxSidebarWidth?.let { sb.append(",\"maxSidebarWidth\":$it") }
+    node.columns?.let { sb.append(",\"columns\":$it") }
     node.text?.let { sb.append(",\"text\":\"${escJson(it)}\"") }
     // Modifier fields (padding/sizing/alignment) — already formatted as JSON fields
     if (node.modifierJson.isNotEmpty()) sb.append(node.modifierJson)
