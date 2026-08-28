@@ -197,15 +197,20 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             Some(spacer.upcast())
         }
 
-        // Phase 4c: Card / Surface — a bordered Frame with optional label shadow.
-        // Currently maps to gtk::Frame with optional shadow type.
+        // Phase 4c: Card / Surface — a bordered Frame. GtkBin accepts only ONE
+        // child, so children are wrapped in a gtk::Box first.
         "Card" | "Surface" => {
             let frame = gtk::Frame::new(None);
             frame.set_shadow_type(gtk::ShadowType::EtchedIn);
-            for child in &node.children {
-                if let Some(c) = build_widget(child) {
-                    frame.add(&c);
+            if !node.children.is_empty() {
+                let inner = gtk::Box::new(gtk::Orientation::Vertical, 4);
+                for child in &node.children {
+                    if let Some(c) = build_widget(child) {
+                        inner.add(&c);
+                    }
                 }
+                inner.show_all();
+                frame.add(&inner);
             }
             frame.show_all();
             Some(frame.upcast())
