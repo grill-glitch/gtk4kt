@@ -345,7 +345,7 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             Some(btn.upcast())
         }
 
-        // Phase 5a: ElevatedCard — Card with stronger shadow (etched-out).
+                // Phase 5a: ElevatedCard — Card with stronger shadow (etched-out).
         "ElevatedCard" => {
             let frame = gtk::Frame::new(None);
             frame.set_shadow_type(gtk::ShadowType::Out);
@@ -361,6 +361,39 @@ fn build_widget(node: &WidgetNode) -> Option<gtk::Widget> {
             }
             frame.show_all();
             Some(frame.upcast())
+        }
+
+        // Phase 6-3: ClickableCard — flat-styled button containing card content.
+        // Maps to gtk::Button with no relief so it visually resembles a Card.
+        "ClickableCard" | "ClickableElevatedCard" => {
+            let btn = gtk::Button::new();
+            btn.set_relief(gtk::ReliefStyle::None);
+            // Inset a Box containing the card's children, similar to Card's
+            // inner-Box pattern.
+            if !node.children.is_empty() {
+                let inner = gtk::Box::new(gtk::Orientation::Vertical, 4);
+                inner.set_border_width(if node.widget_type == "ClickableElevatedCard" { 4 } else { 2 });
+                for child in &node.children {
+                    if let Some(c) = build_widget(child) {
+                        inner.add(&c);
+                    }
+                }
+                inner.show_all();
+                btn.add(&inner);
+            }
+            if let Some(handle) = node.on_click_handle {
+                let handle_copy = handle;
+                btn.connect_clicked(move |_| {
+                    if let Some(invoker) = INVOKER_ADDR.with(|r| *r.borrow()) {
+                        type InvokerFn = extern "C" fn(u64, *const std::ffi::c_void);
+                        let f: InvokerFn = unsafe { std::mem::transmute(invoker) };
+                        f(handle_copy, std::ptr::null());
+                    }
+                });
+            }
+            apply_modifier(&btn, node);
+            btn.show();
+            Some(btn.upcast())
         }
 
         // Phase 5a: FloatingActionButton — rounded-corner button with shadow.

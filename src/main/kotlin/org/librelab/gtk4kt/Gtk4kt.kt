@@ -284,6 +284,25 @@ class BoxBuilder {
     fun card(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) = Card(modifier, block)
 
     /**
+     * Compose-like `Card { ... }` with onClick — clickable card. Maps to a
+     * flat-styled gtk::Button so it looks like a Card, not a regular Button.
+     */
+    fun Card(
+        onClick: () -> Unit,
+        modifier: Modifier = Modifier.Empty,
+        block: BoxBuilder.() -> Unit,
+    ) {
+        val handleId = registerCallback(onClick)
+        val b = BoxBuilder()
+        b.block()
+        children.add(
+            WidgetNode("ClickableCard", modifierJson = modifier.toJsonFields(),
+                onClick = handleId.takeIf { it != 0L },
+                children = b.children.toList())
+        )
+    }
+
+    /**
      * Compose-like Surface — same as Card for now (Frame container).
      */
     fun Surface(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) {
@@ -398,6 +417,24 @@ class BoxBuilder {
 
     fun elevatedCard(modifier: Modifier = Modifier.Empty, block: BoxBuilder.() -> Unit) =
         ElevatedCard(modifier, block)
+
+    /**
+     * Compose-like `ElevatedCard { ... }` with onClick — clickable variant.
+     */
+    fun ElevatedCard(
+        onClick: () -> Unit,
+        modifier: Modifier = Modifier.Empty,
+        block: BoxBuilder.() -> Unit,
+    ) {
+        val handleId = registerCallback(onClick)
+        val b = BoxBuilder()
+        b.block()
+        children.add(
+            WidgetNode("ClickableElevatedCard", modifierJson = modifier.toJsonFields(),
+                onClick = handleId.takeIf { it != 0L },
+                children = b.children.toList())
+        )
+    }
 
     /**
      * Compose-like `TextButton` — minimal-styling button (no padding around label).
